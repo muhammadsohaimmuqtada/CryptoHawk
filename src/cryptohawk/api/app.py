@@ -9,6 +9,7 @@ from cryptohawk import __version__
 from cryptohawk.api.schemas import (
     AssetCreateRequest,
     ManagedScanRequest,
+    QueuedScanRequest,
     ScanExecutionResponse,
     ScanResponse,
     SourceScanRequest,
@@ -17,7 +18,7 @@ from cryptohawk.api.schemas import (
 )
 from cryptohawk.cbom.exporter import CycloneDXExporter
 from cryptohawk.config import settings
-from cryptohawk.domain.inventory import ManagedAsset, ScanJob, Workspace
+from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanJob, Workspace
 from cryptohawk.domain.models import DashboardSummary, Finding
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.source import SourceScanner
@@ -25,9 +26,11 @@ from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.scan_jobs import AssetScanError, ScanJobService
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.queue import ScanQueueRepository
 
 repo = FindingRepository(settings.database_url)
 inventory = InventoryRepository(settings.database_url)
+scan_queue = ScanQueueRepository(inventory)
 risk_engine = RiskEngine()
 source_scanner = SourceScanner()
 tls_scanner = TLSScanner(allow_private_targets=settings.allow_private_targets)
@@ -45,6 +48,7 @@ scan_jobs = ScanJobService(
 async def lifespan(_: FastAPI):
     inventory.create_schema()
     repo.create_schema()
+    scan_queue.create_schema()
     yield
 
 
@@ -68,6 +72,20 @@ def _require_workspace(workspace_id: str) -> Workspace:
     if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return workspace
+
+
+def _require_asset(workspace_id: str, asset_id: str) -> ManagedAsset:
+    asset = inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset not found in workspace")
+    return asset
+
+
+def _require_scan_job(workspace_id: str, job_id: str) -> ScanJob:
+    job = inventory.get_scan_job(workspace_id=workspace_id, job_id=job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="scan job not found in workspace")
+    return job
 
 
 @app.get("/health")
@@ -190,6 +208,35 @@ def run_managed_scan(
     return ScanExecutionResponse(job=job, findings=findings)
 
 
+@app.post(
+    "/api/v1/workspaces/{workspace_id}/assets/{asset_id}/scan-jobs",
+    response_model=ScanJob,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_managed_scan(
+    workspace_id: str,
+    asset_id: str,
+    request: QueuedScanRequest,
+) -> ScanJob:
+    _require_workspace(workspace_id)
+    asset = _require_asset(workspace_id, asset_id)
+    if asset.kind == ManagedAssetKind.SOURCE:
+        raise HTTPException(
+            status_code=422,
+            detail="durable source scans require a repository-backed source collector",
+        )
+    try:
+        kind = scan_jobs.executor.scan_kind(asset)
+        return scan_queue.enqueue(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            kind=kind,
+            max_attempts=request.max_attempts,
+        )
+    except AssetScanError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get(
     "/api/v1/workspaces/{workspace_id}/scan-jobs",
     response_model=list[ScanJob],
@@ -200,6 +247,31 @@ def list_scan_jobs(
 ) -> list[ScanJob]:
     _require_workspace(workspace_id)
     return inventory.list_scan_jobs(workspace_id=workspace_id, limit=limit)
+
+
+@app.get(
+    "/api/v1/workspaces/{workspace_id}/scan-jobs/{job_id}",
+    response_model=ScanJob,
+)
+def get_scan_job(workspace_id: str, job_id: str) -> ScanJob:
+    _require_workspace(workspace_id)
+    return _require_scan_job(workspace_id, job_id)
+
+
+@app.post(
+    "/api/v1/workspaces/{workspace_id}/scan-jobs/{job_id}/cancel",
+    response_model=ScanJob,
+)
+def cancel_scan_job(workspace_id: str, job_id: str) -> ScanJob:
+    _require_workspace(workspace_id)
+    _require_scan_job(workspace_id, job_id)
+    try:
+        return scan_queue.request_cancel(job_id=job_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="scan job is not managed by the durable queue",
+        ) from exc
 
 
 @app.get(
