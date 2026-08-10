@@ -79,7 +79,8 @@ class ScanWorker:
                     "durable source scans require a repository-backed source collector"
                 )
 
-            self._heartbeat_or_cancel(job.id)
+            if self._heartbeat_or_cancel(job.id):
+                return True
             results = self.executor.execute(asset, timeout=self.config.scan_timeout)
 
             if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
@@ -126,18 +127,19 @@ class ScanWorker:
             if not worked:
                 time.sleep(self.config.poll_interval)
 
-    def _heartbeat_or_cancel(self, job_id: str) -> None:
+    def _heartbeat_or_cancel(self, job_id: str) -> bool:
         try:
             self.queue.heartbeat(
                 job_id=job_id,
                 worker_id=self.config.worker_id,
                 lease_seconds=self.config.lease_seconds,
             )
+            return False
         except RuntimeError:
             if self.queue.should_cancel(job_id=job_id, worker_id=self.config.worker_id):
                 self.queue.acknowledge_cancel(
                     job_id=job_id,
                     worker_id=self.config.worker_id,
                 )
-                raise AssetScanError("scan canceled before collector execution")
+                return True
             raise
