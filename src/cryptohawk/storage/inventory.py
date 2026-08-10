@@ -29,6 +29,7 @@ from cryptohawk.domain.inventory import (
 )
 from cryptohawk.domain.models import ScanContext
 from cryptohawk.storage.database import Base
+from cryptohawk.storage.time import as_utc
 
 
 class WorkspaceRecord(Base):
@@ -301,7 +302,12 @@ class InventoryRepository:
 
     @staticmethod
     def _workspace_from_record(row: WorkspaceRecord) -> Workspace:
-        return Workspace(id=row.id, name=row.name, slug=row.slug, created_at=row.created_at)
+        return Workspace(
+            id=row.id,
+            name=row.name,
+            slug=row.slug,
+            created_at=as_utc(row.created_at),
+        )
 
     @staticmethod
     def _asset_record(asset: ManagedAsset) -> ManagedAssetRecord:
@@ -337,8 +343,8 @@ class InventoryRepository:
             ),
             tags=json.loads(row.tags_json),
             enabled=row.enabled,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+            created_at=as_utc(row.created_at),
+            updated_at=as_utc(row.updated_at),
         )
 
     @staticmethod
@@ -364,9 +370,9 @@ class InventoryRepository:
             asset_id=row.asset_id,
             kind=ScanKind(row.kind),
             status=ScanStatus(row.status),
-            requested_at=row.requested_at,
-            started_at=row.started_at,
-            finished_at=row.finished_at,
+            requested_at=as_utc(row.requested_at),
+            started_at=as_utc(row.started_at),
+            finished_at=as_utc(row.finished_at),
             findings_count=row.findings_count,
             error_message=row.error_message,
         )
