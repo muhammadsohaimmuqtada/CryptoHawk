@@ -19,7 +19,23 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: ruff check src tests migrations
       - run: pytest --cov=cryptohawk --cov-report=term-missing
-      - run: pip-audit
+      - name: Audit Python dependencies
+        run: |
+          set +e
+          pip-audit --format=json --output pip-audit.json
+          status=$?
+          if [ -f pip-audit.json ]; then
+            cat pip-audit.json
+          fi
+          exit "$status"
+      - name: Preserve Python dependency audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   frontend:
     runs-on: ubuntu-latest
