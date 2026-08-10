@@ -15,15 +15,26 @@ from cryptohawk.domain.models import (
     Evidence,
     Primitive,
 )
+from cryptohawk.security.network import resolve_target
 
 
 class TLSScanner:
+    def __init__(self, *, allow_private_targets: bool = False) -> None:
+        self.allow_private_targets = allow_private_targets
+
     def scan(self, hostname: str, port: int = 443, timeout: float = 5.0) -> list[CryptoObservation]:
         context = ssl.create_default_context()
+        target = resolve_target(
+            hostname,
+            port,
+            allow_private=self.allow_private_targets,
+        )
         asset_id = f"tls:{hostname}:{port}"
         observations: list[CryptoObservation] = []
 
-        with socket.create_connection((hostname, port), timeout=timeout) as raw:
+        with socket.socket(target.family, target.socktype, target.proto) as raw:
+            raw.settimeout(timeout)
+            raw.connect(target.sockaddr)
             with context.wrap_socket(raw, server_hostname=hostname) as tls:
                 der = tls.getpeercert(binary_form=True)
                 version = tls.version() or "unknown"
@@ -43,7 +54,10 @@ class TLSScanner:
                 evidence=Evidence(
                     source="tls-handshake",
                     locator=f"{hostname}:{port}",
-                    metadata={"cipher_suite": cipher[0] if cipher else None},
+                    metadata={
+                        "cipher_suite": cipher[0] if cipher else None,
+                        "resolved_ip": target.ip,
+                    },
                 ),
             )
         )
@@ -84,6 +98,7 @@ class TLSScanner:
                         "serial_number": str(cert.serial_number),
                         "not_valid_before": cert.not_valid_before_utc.astimezone(UTC).isoformat(),
                         "not_valid_after": cert.not_valid_after_utc.astimezone(UTC).isoformat(),
+                        "resolved_ip": target.ip,
                     },
                 ),
             )
@@ -104,7 +119,11 @@ class TLSScanner:
                     family=normalized,
                     primitive=Primitive.HASH,
                     confidence=1.0,
-                    evidence=Evidence(source="x509-certificate", locator=f"{hostname}:{port}"),
+                    evidence=Evidence(
+                        source="x509-certificate",
+                        locator=f"{hostname}:{port}",
+                        metadata={"resolved_ip": target.ip},
+                    ),
                 )
             )
         return observations
