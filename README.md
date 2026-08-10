@@ -18,6 +18,7 @@ The core decision engine is deterministic. Findings carry source evidence, confi
 
 - Source-code cryptographic primitive discovery across common languages and configuration files
 - Live TLS endpoint inspection with negotiated protocol, cipher and X.509 public-key evidence
+- Public-target network guard with DNS pinning; private targets require explicit self-hosted opt-in
 - Parameter-aware rules for RSA and AES key sizes
 - PQC classification for ML-KEM, ML-DSA and SLH-DSA
 - Migration recommendations for quantum-vulnerable RSA, ECDSA, ECDH and DH usage
@@ -123,6 +124,10 @@ CryptoHawk-specific risk metadata is emitted as namespaced CycloneDX properties 
 ## Roadmap
 
 The next product slices are repository-native scanning, container/image analysis, SSH and certificate-estate discovery, cloud/Kubernetes collectors, richer crypto dependency graphs, organization/workspace tenancy, policy packs, continuous scans, drift detection, signed evidence bundles and enterprise SSO/RBAC.
+
+### Network scan safety
+
+The API blocks non-global TLS targets by default and connects to the exact validated DNS answer, avoiding a second resolution between policy evaluation and connection. For a self-hosted enterprise collector that must inspect RFC1918/internal assets, set `CRYPTOHAWK_ALLOW_PRIVATE_TARGETS=true` deliberately at the deployment boundary. Do not enable that option on a shared public SaaS worker.
 
 ## Security
 

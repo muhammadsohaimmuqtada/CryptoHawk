@@ -18,7 +18,7 @@ from cryptohawk.storage.database import FindingRepository
 repo = FindingRepository(settings.database_url)
 risk_engine = RiskEngine()
 source_scanner = SourceScanner()
-tls_scanner = TLSScanner()
+tls_scanner = TLSScanner(allow_private_targets=settings.allow_private_targets)
 exporter = CycloneDXExporter()
 
 

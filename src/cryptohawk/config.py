@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "sqlite:///./cryptohawk.db"
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    allow_private_targets: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
 
