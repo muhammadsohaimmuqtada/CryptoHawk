@@ -13,7 +13,7 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Persistent findings and CycloneDX 1.7 CBOM export
 - [x] Outbound target policy for public SaaS operation
 - [x] Workspaces, managed assets, tenant-scoped findings, and scan-job state
-- [ ] Durable worker queue with leases, retries, cancellation, and crash recovery
+- [x] Durable worker queue with leases, retries, cancellation, and crash recovery
 - [ ] Scheduled scans and drift detection
 - [ ] Repository-native collector with commit identity and incremental scanning
 - [ ] Certificate-estate and SSH collectors
