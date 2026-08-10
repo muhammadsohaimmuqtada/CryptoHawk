@@ -24,6 +24,22 @@ services:
     ports:
       - "8000:8000"
 
+  worker:
+    build: .
+    command:
+      - cryptohawk
+      - worker
+      - --worker-id
+      - docker-worker-1
+      - --lease-seconds
+      - "60"
+    environment:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   web:
     build: ./frontend
     depends_on:
