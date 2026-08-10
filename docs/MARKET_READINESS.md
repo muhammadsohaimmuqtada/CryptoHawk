@@ -21,8 +21,8 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 
 ### P0 — security boundary
 
-- [ ] Authentication and API-key support
-- [ ] Workspace membership and RBAC enforced at service/data layers
+- [x] Authentication and API-key support
+- [x] Workspace membership and RBAC enforced at service/data layers
 - [ ] Audit log for security-sensitive and administrative actions
 - [ ] Rate limits, request quotas, and scan concurrency controls
 - [ ] Secret handling policy and encrypted connector credentials
