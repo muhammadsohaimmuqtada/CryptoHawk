@@ -58,9 +58,14 @@ class RiskEngine:
                 migration_strategy = "Disable legacy TLS and require TLS 1.2+; prefer TLS 1.3"
                 reasons.append(f"TLS {version} is a legacy protocol version")
             elif version == "1.2":
-                reasons.append("TLS 1.2 security depends on negotiated cipher suite and key exchange")
+                reasons.append(
+                    "TLS 1.2 security depends on negotiated cipher suite and key exchange"
+                )
             elif version == "1.3":
-                reasons.append("TLS 1.3 protocol baseline is modern; assess key exchange and certificates separately")
+                reasons.append(
+                    "TLS 1.3 protocol baseline is modern; assess key exchange and "
+                    "certificates separately"
+                )
             else:
                 reasons.append("Protocol version requires review")
 
@@ -71,17 +76,25 @@ class RiskEngine:
             migration_strategy = profile.migration_strategy
             security_bits = profile.security_bits
             if profile.deprecated:
-                reasons.append(f"{profile.family} is deprecated or unsuitable for new security designs")
+                reasons.append(
+                    f"{profile.family} is deprecated or unsuitable for new security designs"
+                )
             if profile.quantum_status == QuantumStatus.VULNERABLE:
                 quantum = 25
-                reasons.append(f"{profile.family} is not resistant to a cryptographically relevant quantum computer")
+                reasons.append(
+                    f"{profile.family} is not resistant to a cryptographically relevant "
+                    "quantum computer"
+                )
             elif profile.quantum_status == QuantumStatus.TRANSITION:
                 quantum = 8
                 reasons.append(f"{profile.family} needs post-quantum parameter and usage review")
             elif profile.quantum_status == QuantumStatus.SAFE:
                 quantum = 0
-                reasons.append(f"{profile.family} is a post-quantum or high-margin primitive in this policy")
+                reasons.append(
+                    f"{profile.family} is a post-quantum or high-margin primitive in this policy"
+                )
 
+        # Parameter-sensitive rules override family defaults where evidence is stronger.
         if observation.family == "RSA" and observation.key_size:
             if observation.key_size < 2048:
                 weakness = 40
@@ -96,7 +109,9 @@ class RiskEngine:
                 reasons.append(f"AES key size {observation.key_size} is insufficient")
             elif observation.key_size == 128:
                 quantum = max(quantum, 10)
-                reasons.append("AES-128 has reduced effective security margin under Grover-style search")
+                reasons.append(
+                    "AES-128 has reduced effective security margin under Grover-style search"
+                )
             elif observation.key_size >= 256:
                 quantum = min(quantum, 3)
                 reasons.append("AES-256 retains a strong post-quantum security margin")
@@ -107,13 +122,17 @@ class RiskEngine:
 
         lifetime = min(context.data_lifetime_years, 10)
         if lifetime >= 5 and quantum_status == QuantumStatus.VULNERABLE:
-            reasons.append("Long confidentiality lifetime increases harvest-now-decrypt-later exposure")
+            reasons.append(
+                "Long confidentiality lifetime increases harvest-now-decrypt-later exposure"
+            )
 
         criticality = context.asset_criticality
         score = min(100, weakness + quantum + internet + lifetime + criticality)
 
         if observation.confidence < 0.75:
-            reasons.append("Detection confidence is below high-confidence threshold; verify before remediation")
+            reasons.append(
+                "Detection confidence is below high-confidence threshold; verify before remediation"
+            )
 
         risk = RiskAssessment(
             observation_id=observation.id,

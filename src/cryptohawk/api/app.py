@@ -60,7 +60,11 @@ def list_findings(limit: int = Query(default=200, ge=1, le=1000)) -> list[Findin
 
 @app.post("/api/v1/scan/source", response_model=ScanResponse)
 def scan_source(request: SourceScanRequest) -> ScanResponse:
-    observations = source_scanner.scan_text(request.source, asset_name=request.filename, locator=request.filename)
+    observations = source_scanner.scan_text(
+        request.source,
+        asset_name=request.filename,
+        locator=request.filename,
+    )
     findings = [risk_engine.assess(observation, request.context) for observation in observations]
     persisted = repo.upsert_many(findings) if request.persist else 0
     return ScanResponse(findings=findings, persisted=persisted)

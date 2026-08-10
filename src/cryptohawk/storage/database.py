@@ -34,7 +34,12 @@ class FindingRecord(Base):
 class FindingRepository:
     def __init__(self, database_url: str = "sqlite:///./cryptohawk.db") -> None:
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-        self.engine = create_engine(database_url, future=True, pool_pre_ping=True, connect_args=connect_args)
+        self.engine = create_engine(
+            database_url,
+            future=True,
+            pool_pre_ping=True,
+            connect_args=connect_args,
+        )
         self.SessionLocal = sessionmaker(self.engine, expire_on_commit=False)
 
     def create_schema(self) -> None:
@@ -67,7 +72,9 @@ class FindingRepository:
 
     def list_findings(self, *, limit: int = 200) -> list[Finding]:
         with self.SessionLocal() as session:
-            rows = session.scalars(select(FindingRecord).order_by(FindingRecord.risk_score.desc()).limit(limit)).all()
+            rows = session.scalars(
+                select(FindingRecord).order_by(FindingRecord.risk_score.desc()).limit(limit)
+            ).all()
             return [Finding.model_validate(json.loads(row.payload)) for row in rows]
 
     def clear(self) -> None:
@@ -78,9 +85,21 @@ class FindingRepository:
     def summary(self) -> DashboardSummary:
         with self.SessionLocal() as session:
             total = session.scalar(select(func.count()).select_from(FindingRecord)) or 0
-            severity_counts = dict(session.execute(select(FindingRecord.severity, func.count()).group_by(FindingRecord.severity)).all())
-            quantum_vulnerable = session.scalar(select(func.count()).select_from(FindingRecord).where(FindingRecord.quantum_status == "vulnerable")) or 0
-            pqc_ready = session.scalar(select(func.count()).select_from(FindingRecord).where(FindingRecord.quantum_status == "safe")) or 0
+            severity_counts = dict(
+                session.execute(
+                    select(FindingRecord.severity, func.count()).group_by(FindingRecord.severity)
+                ).all()
+            )
+            quantum_vulnerable = session.scalar(
+                select(func.count())
+                .select_from(FindingRecord)
+                .where(FindingRecord.quantum_status == "vulnerable")
+            ) or 0
+            pqc_ready = session.scalar(
+                select(func.count())
+                .select_from(FindingRecord)
+                .where(FindingRecord.quantum_status == "safe")
+            ) or 0
             return DashboardSummary(
                 total_findings=total,
                 critical=severity_counts.get(Severity.CRITICAL.value, 0),

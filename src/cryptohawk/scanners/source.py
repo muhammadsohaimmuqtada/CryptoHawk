@@ -27,13 +27,22 @@ DETECTORS: tuple[Detector, ...] = (
     Detector(re.compile(r"\b(?:ARC4|RC4)\b"), "RC4", 0.96),
     Detector(re.compile(r"\bDES\b"), "DES", 0.90),
     Detector(re.compile(r"\bAES(?:[-_ ]?(?P<bits>128|192|256))?\b", re.I), "AES", 0.90, "bits"),
-    Detector(re.compile(r"\bRSA(?:[-_ ]?(?P<bits>1024|2048|3072|4096|8192))?\b", re.I), "RSA", 0.90, "bits"),
+    Detector(
+        re.compile(r"\bRSA(?:[-_ ]?(?P<bits>1024|2048|3072|4096|8192))?\b", re.I),
+        "RSA",
+        0.90,
+        "bits",
+    ),
     Detector(re.compile(r"\bECDSA\b", re.I), "ECDSA", 0.92),
     Detector(re.compile(r"\bECDH\b", re.I), "ECDH", 0.92),
     Detector(re.compile(r"\b(?:DiffieHellman|Diffie-Hellman|\bDH\b)\b", re.I), "DH", 0.83),
     Detector(re.compile(r"\b(?:ChaCha20|CHACHA20)\b"), "ChaCha20", 0.94),
     Detector(re.compile(r"\b(?:ML[-_]?KEM|Kyber|CRYSTALS[-_]?Kyber)\b", re.I), "ML-KEM", 0.97),
-    Detector(re.compile(r"\b(?:ML[-_]?DSA|Dilithium|CRYSTALS[-_]?Dilithium)\b", re.I), "ML-DSA", 0.97),
+    Detector(
+        re.compile(r"\b(?:ML[-_]?DSA|Dilithium|CRYSTALS[-_]?Dilithium)\b", re.I),
+        "ML-DSA",
+        0.97,
+    ),
     Detector(re.compile(r"\b(?:SLH[-_]?DSA|SPHINCS\+?)\b", re.I), "SLH-DSA", 0.97),
 )
 
@@ -42,17 +51,38 @@ SUPPORTED_EXTENSIONS = {
     ".cs", ".rb", ".php", ".swift", ".kt", ".kts", ".scala", ".sh", ".yaml", ".yml", ".json",
     ".toml", ".xml", ".properties", ".conf", ".ini", ".env", ".pem",
 }
-IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "target", ".next", "coverage"}
+IGNORED_DIRS = {
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    "coverage",
+}
 
 
 class SourceScanner:
-    def scan_text(self, text: str, *, asset_name: str = "inline", locator: str = "inline") -> list[CryptoObservation]:
+    def scan_text(
+        self,
+        text: str,
+        *,
+        asset_name: str = "inline",
+        locator: str = "inline",
+    ) -> list[CryptoObservation]:
         asset_id = f"src:{uuid4()}"
         observations: list[CryptoObservation] = []
         seen: set[tuple[int, str, int | None]] = set()
         for line_no, line in enumerate(text.splitlines(), start=1):
             stripped = line.strip()
-            if stripped.startswith(("import ", "from ")) and not any(token in stripped for token in ("=", "(", ")")):
+            # Imports describe available libraries, not proof that an algorithm is used.
+            # Dependency inventory will be modeled separately; suppress these low-signal hits.
+            import_only = stripped.startswith(("import ", "from ")) and not any(
+                token in stripped for token in ("=", "(", ")")
+            )
+            if import_only:
                 continue
             for detector in DETECTORS:
                 for match in detector.pattern.finditer(line):
@@ -77,7 +107,12 @@ class SourceScanner:
                             key_size=key_size,
                             parameter_set=str(key_size) if key_size else None,
                             confidence=detector.confidence,
-                            evidence=Evidence(source="source-code", locator=locator, line=line_no, snippet=line.strip()[:240]),
+                            evidence=Evidence(
+                                source="source-code",
+                                locator=locator,
+                                line=line_no,
+                                snippet=line.strip()[:240],
+                            ),
                         )
                     )
         return observations
@@ -87,7 +122,11 @@ class SourceScanner:
         if not root.exists():
             raise FileNotFoundError(root)
         if root.is_file():
-            return self.scan_text(root.read_text(errors="ignore"), asset_name=root.name, locator=str(root))
+            return self.scan_text(
+                root.read_text(errors="ignore"),
+                asset_name=root.name,
+                locator=str(root),
+            )
 
         results: list[CryptoObservation] = []
         for path in root.rglob("*"):

@@ -8,7 +8,13 @@ from uuid import uuid4
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, rsa
 
-from cryptohawk.domain.models import AssetType, CryptoAssetType, CryptoObservation, Evidence, Primitive
+from cryptohawk.domain.models import (
+    AssetType,
+    CryptoAssetType,
+    CryptoObservation,
+    Evidence,
+    Primitive,
+)
 
 
 class TLSScanner:
@@ -34,7 +40,11 @@ class TLSScanner:
                 primitive=Primitive.OTHER,
                 protocol_version=version.replace("TLSv", ""),
                 confidence=1.0,
-                evidence=Evidence(source="tls-handshake", locator=f"{hostname}:{port}", metadata={"cipher_suite": cipher[0] if cipher else None}),
+                evidence=Evidence(
+                    source="tls-handshake",
+                    locator=f"{hostname}:{port}",
+                    metadata={"cipher_suite": cipher[0] if cipher else None},
+                ),
             )
         )
 
@@ -81,7 +91,10 @@ class TLSScanner:
 
         sig_hash = cert.signature_hash_algorithm
         if sig_hash:
-            normalized = sig_hash.name.upper().replace("SHA", "SHA-") if sig_hash.name.lower().startswith("sha") else sig_hash.name.upper()
+            if sig_hash.name.lower().startswith("sha"):
+                normalized = sig_hash.name.upper().replace("SHA", "SHA-")
+            else:
+                normalized = sig_hash.name.upper()
             observations.append(
                 CryptoObservation(
                     asset_id=asset_id,

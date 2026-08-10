@@ -13,9 +13,14 @@ class CycloneDXExporter:
         components: list[dict] = []
         for finding in findings:
             obs = finding.observation
-            props = {"assetType": obs.crypto_asset_type.value}
+            props = {
+                "assetType": obs.crypto_asset_type.value,
+            }
             if obs.crypto_asset_type == CryptoAssetType.ALGORITHM:
-                algorithm_props: dict[str, object] = {"primitive": obs.primitive.value, "algorithmFamily": obs.family}
+                algorithm_props: dict[str, object] = {
+                    "primitive": obs.primitive.value,
+                    "algorithmFamily": obs.family,
+                }
                 if obs.parameter_set:
                     algorithm_props["parameterSetIdentifier"] = obs.parameter_set
                 props["algorithmProperties"] = algorithm_props
@@ -34,7 +39,10 @@ class CycloneDXExporter:
                     "properties": [
                         {"name": "cryptohawk:risk:score", "value": str(finding.risk.score)},
                         {"name": "cryptohawk:risk:severity", "value": finding.risk.severity.value},
-                        {"name": "cryptohawk:pqc:status", "value": finding.risk.quantum_status.value},
+                        {
+                            "name": "cryptohawk:pqc:status",
+                            "value": finding.risk.quantum_status.value,
+                        },
                         {"name": "cryptohawk:asset:id", "value": obs.asset_id},
                         {"name": "cryptohawk:evidence:source", "value": obs.evidence.source},
                     ],
@@ -48,7 +56,15 @@ class CycloneDXExporter:
             "version": 1,
             "metadata": {
                 "timestamp": datetime.now(UTC).isoformat(),
-                "tools": {"components": [{"type": "application", "name": "CryptoHawk", "version": "0.1.0"}]},
+                "tools": {
+                    "components": [
+                        {
+                            "type": "application",
+                            "name": "CryptoHawk",
+                            "version": "0.1.0",
+                        }
+                    ]
+                },
             },
             "components": components,
         }
