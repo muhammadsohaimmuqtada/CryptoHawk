@@ -13,6 +13,7 @@ from cryptohawk.api.auth import (
     inventory,
     require_workspace_role,
 )
+from cryptohawk.api.middleware import SecurityAuditMiddleware, audit_repo
 from cryptohawk.api.schemas import (
     ApiKeyCreateRequest,
     AssetCreateRequest,
@@ -30,6 +31,7 @@ from cryptohawk.api.schemas import (
 )
 from cryptohawk.cbom.exporter import CycloneDXExporter
 from cryptohawk.config import settings
+from cryptohawk.domain.audit import AuditEvent
 from cryptohawk.domain.auth import (
     ApiKeyMetadata,
     IssuedApiKey,
@@ -80,6 +82,7 @@ async def lifespan(_: FastAPI):
     repo.create_schema()
     scan_queue.create_schema()
     auth_repo.create_schema()
+    audit_repo.create_schema()
     yield
 
 
@@ -94,8 +97,9 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
+app.add_middleware(SecurityAuditMiddleware)
 
 
 def _legacy_guard() -> None:
@@ -346,6 +350,19 @@ def revoke_api_key(workspace_id: str, key_id: str, principal: AdminPrincipal) ->
         auth_repo.revoke_api_key(principal, workspace_id, key_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/workspaces/{workspace_id}/audit",
+    response_model=list[AuditEvent],
+)
+def list_audit_events(
+    workspace_id: str,
+    _principal: AdminPrincipal,
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> list[AuditEvent]:
+    _require_workspace(workspace_id)
+    return audit_repo.list_workspace(workspace_id, limit=limit)
 
 
 @app.post(
