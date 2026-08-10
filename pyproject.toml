@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [{name = "Muhammad Sohaim Muqtada"}]
 dependencies = [
+  "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
   "pydantic>=2.9,<3",
@@ -27,6 +28,7 @@ dev = [
   "httpx>=0.27,<1",
   "ruff>=0.8,<1",
   "mypy>=1.13,<2",
+  "pip-audit>=2.9,<3",
 ]
 
 [project.scripts]
