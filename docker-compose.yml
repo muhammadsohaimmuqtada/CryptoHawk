@@ -13,14 +13,25 @@ services:
     volumes:
       - cryptohawk-db:/var/lib/postgresql/data
 
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: .
     environment:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
       CRYPTOHAWK_CORS_ORIGINS: http://localhost:3000
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
 
@@ -35,9 +46,10 @@ services:
       - "60"
     environment:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   web:
