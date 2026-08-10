@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cryptohawk.config import settings
@@ -17,14 +17,17 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def get_current_principal(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
 ) -> Principal:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Bearer authentication is required")
     try:
-        return auth_repo.authenticate(credentials.credentials)
+        principal = auth_repo.authenticate(credentials.credentials)
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    request.state.principal = principal
+    return principal
 
 
 def require_workspace_role(
