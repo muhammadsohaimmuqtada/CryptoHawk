@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
+import socket
 
 from cryptohawk.api.app import app
 from cryptohawk.cbom.exporter import CycloneDXExporter
@@ -9,11 +12,19 @@ from cryptohawk.config import settings
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.tls import TLSScanner
+from cryptohawk.services.executor import AssetScanExecutor
+from cryptohawk.services.worker import ScanWorker, WorkerConfig
 from cryptohawk.storage.database import FindingRepository
+from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.queue import ScanQueueRepository
 
 
 def _print(findings) -> None:
     print(json.dumps([finding.model_dump(mode="json") for finding in findings], indent=2))
+
+
+def _default_worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
 
 
 def main() -> None:
@@ -36,6 +47,14 @@ def main() -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
 
+    worker = sub.add_parser("worker", help="Run a durable CryptoHawk scan worker")
+    worker.add_argument("--worker-id", default=_default_worker_id())
+    worker.add_argument("--lease-seconds", type=int, default=60)
+    worker.add_argument("--poll-interval", type=float, default=1.0)
+    worker.add_argument("--retry-backoff", type=int, default=5)
+    worker.add_argument("--scan-timeout", type=float, default=5.0)
+    worker.add_argument("--once", action="store_true")
+
     args = parser.parse_args()
     repo = FindingRepository(settings.database_url)
     repo.create_schema()
@@ -47,7 +66,8 @@ def main() -> None:
             repo.upsert_many(findings)
         _print(findings)
     elif args.command == "scan-tls":
-        findings = [engine.assess(obs) for obs in TLSScanner().scan(args.hostname, args.port)]
+        scanner = TLSScanner(allow_private_targets=settings.allow_private_targets)
+        findings = [engine.assess(obs) for obs in scanner.scan(args.hostname, args.port)]
         if not args.no_persist:
             repo.upsert_many(findings)
         _print(findings)
@@ -60,3 +80,33 @@ def main() -> None:
         import uvicorn
 
         uvicorn.run(app, host=args.host, port=args.port)
+    elif args.command == "worker":
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+        inventory = InventoryRepository(settings.database_url)
+        queue = ScanQueueRepository(inventory)
+        queue.create_schema()
+        executor = AssetScanExecutor(
+            risk_engine=engine,
+            source_scanner=SourceScanner(),
+            tls_scanner=TLSScanner(allow_private_targets=settings.allow_private_targets),
+        )
+        runner = ScanWorker(
+            inventory,
+            repo,
+            queue,
+            executor=executor,
+            config=WorkerConfig(
+                worker_id=args.worker_id,
+                lease_seconds=args.lease_seconds,
+                poll_interval=args.poll_interval,
+                retry_backoff_seconds=args.retry_backoff,
+                scan_timeout=args.scan_timeout,
+            ),
+        )
+        if args.once:
+            runner.run_once()
+        else:
+            runner.run_forever()
