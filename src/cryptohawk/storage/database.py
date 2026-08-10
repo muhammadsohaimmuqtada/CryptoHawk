@@ -3,14 +3,22 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, select
+from sqlalchemy import DateTime, ForeignKey, Integer, MetaData, String, Text, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from cryptohawk.config import settings
 from cryptohawk.domain.models import DashboardSummary, Finding, Severity
 
 
+class ManagedMetaData(MetaData):
+    def create_all(self, bind, tables=None, checkfirst: bool = True) -> None:
+        if not settings.auto_create_schema:
+            return
+        super().create_all(bind, tables=tables, checkfirst=checkfirst)
+
+
 class Base(DeclarativeBase):
-    pass
+    metadata = ManagedMetaData()
 
 
 class FindingRecord(Base):
