@@ -50,6 +50,10 @@ class ManagedScanRequest(BaseModel):
     timeout: float = Field(default=5.0, ge=0.5, le=20.0)
 
 
+class QueuedScanRequest(BaseModel):
+    max_attempts: int = Field(default=3, ge=1, le=20)
+
+
 class ScanExecutionResponse(BaseModel):
     job: ScanJob
     findings: list[Finding]
