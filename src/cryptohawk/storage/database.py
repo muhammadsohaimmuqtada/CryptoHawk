@@ -3,7 +3,17 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from sqlalchemy import DateTime, ForeignKey, Integer, MetaData, String, Text, create_engine, func, select
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    create_engine,
+    func,
+    select,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from cryptohawk.config import settings
