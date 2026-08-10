@@ -35,7 +35,6 @@ from cryptohawk.domain.auth import (
     IssuedApiKey,
     IssuedToken,
     Principal,
-    User,
     WorkspaceRole,
 )
 from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanJob, Workspace
