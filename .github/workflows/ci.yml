@@ -17,8 +17,9 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: python -m pip install -e '.[dev]'
-      - run: ruff check src tests
+      - run: ruff check src tests migrations
       - run: pytest --cov=cryptohawk --cov-report=term-missing
+      - run: pip-audit
 
   frontend:
     runs-on: ubuntu-latest
@@ -31,4 +32,5 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
+      - run: npm audit --audit-level=high
       - run: npm run build
