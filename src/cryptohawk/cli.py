@@ -6,6 +6,9 @@ import logging
 import os
 import socket
 
+from alembic import command
+from alembic.config import Config
+
 from cryptohawk.api.app import app
 from cryptohawk.cbom.exporter import CycloneDXExporter
 from cryptohawk.config import settings
@@ -25,6 +28,12 @@ def _print(findings) -> None:
 
 def _default_worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _migration_config() -> Config:
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    return config
 
 
 def main() -> None:
@@ -55,9 +64,24 @@ def main() -> None:
     worker.add_argument("--scan-timeout", type=float, default=5.0)
     worker.add_argument("--once", action="store_true")
 
+    migrate = sub.add_parser("migrate", help="Manage the CryptoHawk database schema")
+    migrate.add_argument("action", choices=("upgrade", "downgrade", "current"))
+    migrate.add_argument("revision", nargs="?")
+
     args = parser.parse_args()
+    if args.command == "migrate":
+        config = _migration_config()
+        if args.action == "upgrade":
+            command.upgrade(config, args.revision or "head")
+        elif args.action == "downgrade":
+            command.downgrade(config, args.revision or "-1")
+        else:
+            command.current(config, verbose=True)
+        return
+
     repo = FindingRepository(settings.database_url)
-    repo.create_schema()
+    if settings.auto_create_schema:
+        repo.create_schema()
     engine = RiskEngine()
 
     if args.command == "scan-source":
@@ -87,7 +111,8 @@ def main() -> None:
         )
         inventory = InventoryRepository(settings.database_url)
         queue = ScanQueueRepository(inventory)
-        queue.create_schema()
+        if settings.auto_create_schema:
+            queue.create_schema()
         executor = AssetScanExecutor(
             risk_engine=engine,
             source_scanner=SourceScanner(),
