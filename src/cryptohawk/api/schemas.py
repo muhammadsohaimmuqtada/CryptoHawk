@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from cryptohawk.domain.auth import User, WorkspaceMembership, WorkspaceRole
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanJob
 from cryptohawk.domain.models import Finding, ScanContext
 
@@ -26,6 +27,24 @@ class ScanResponse(BaseModel):
     persisted: int
 
 
+class BootstrapRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    display_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=12, max_length=1024)
+    workspace_name: str = Field(min_length=1, max_length=200)
+    workspace_slug: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
+
+
 class WorkspaceCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     slug: str | None = Field(
@@ -34,6 +53,24 @@ class WorkspaceCreateRequest(BaseModel):
         max_length=80,
         pattern=r"^[a-z0-9][a-z0-9-]*$",
     )
+
+
+class MemberCreateRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    display_name: str = Field(min_length=1, max_length=200)
+    role: WorkspaceRole = WorkspaceRole.ANALYST
+    password: str | None = Field(default=None, min_length=12, max_length=1024)
+
+
+class WorkspaceMemberResponse(BaseModel):
+    user: User
+    membership: WorkspaceMembership
+
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    role: WorkspaceRole = WorkspaceRole.ANALYST
+    expires_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class AssetCreateRequest(BaseModel):
