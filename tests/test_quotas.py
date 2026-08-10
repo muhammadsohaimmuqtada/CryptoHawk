@@ -147,7 +147,7 @@ def test_queue_capacity_does_not_burn_retry_attempts(tmp_path: Path) -> None:
 
 
 def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> None:
-    url, inventory, quota, queue, alpha, alpha_asset = _inventory(tmp_path)
+    _, inventory, _quota, queue, alpha, alpha_asset = _inventory(tmp_path)
     beta = inventory.create_workspace(name="Beta")
     beta_asset = inventory.create_asset(
         workspace_id=beta.id,
@@ -189,7 +189,6 @@ def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> Non
     assert cross_tenant.job.id == beta_job.id
     assert cross_tenant.job.workspace_id == beta.id
 
-    assert url.startswith("sqlite:///")
 
 
 def test_synchronous_scan_respects_shared_capacity(tmp_path: Path, monkeypatch) -> None:
