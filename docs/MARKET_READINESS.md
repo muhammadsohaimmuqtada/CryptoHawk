@@ -26,8 +26,8 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Audit log for security-sensitive and administrative actions
 - [ ] Rate limits, request quotas, and scan concurrency controls
 - [ ] Secret handling policy and encrypted connector credentials
-- [ ] Database migrations with tested upgrade/rollback path
-- [ ] Security headers, hardened production configuration, and dependency scanning
+- [x] Database migrations with tested upgrade/rollback path
+- [x] Security headers, hardened production configuration, and dependency scanning
 
 ### P0 — reliability and evidence
 
