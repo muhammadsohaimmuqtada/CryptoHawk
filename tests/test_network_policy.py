@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from cryptohawk.api.app import app
+from cryptohawk.config import settings
 from cryptohawk.security.network import NetworkTargetError, resolve_target
 
 
@@ -40,7 +41,8 @@ def test_resolution_returns_pinned_socket_address(monkeypatch: pytest.MonkeyPatc
     assert target.sockaddr == ("93.184.216.34", 443)
 
 
-def test_api_rejects_loopback_without_opening_socket() -> None:
+def test_api_rejects_loopback_without_opening_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "allow_legacy_global_api", True)
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scan/tls",
