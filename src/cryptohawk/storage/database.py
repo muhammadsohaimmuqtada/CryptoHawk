@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, func, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from cryptohawk.domain.models import DashboardSummary, Finding, Severity
@@ -31,6 +31,19 @@ class FindingRecord(Base):
     discovered_at: Mapped[object] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class FindingScopeRecord(Base):
+    __tablename__ = "finding_scopes"
+
+    finding_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("findings.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    managed_asset_id: Mapped[str] = mapped_column(String(64), index=True)
+    scan_job_id: Mapped[str] = mapped_column(String(64), index=True)
+
+
 class FindingRepository:
     def __init__(self, database_url: str = "sqlite:///./cryptohawk.db") -> None:
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
@@ -45,7 +58,21 @@ class FindingRepository:
     def create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def upsert_many(self, findings: Iterable[Finding]) -> int:
+    def upsert_many(
+        self,
+        findings: Iterable[Finding],
+        *,
+        workspace_id: str | None = None,
+        managed_asset_id: str | None = None,
+        scan_job_id: str | None = None,
+    ) -> int:
+        scope_values = (workspace_id, managed_asset_id, scan_job_id)
+        scoped = any(value is not None for value in scope_values)
+        if scoped and not all(value is not None for value in scope_values):
+            raise ValueError(
+                "workspace_id, managed_asset_id, and scan_job_id are required together"
+            )
+
         count = 0
         with self.SessionLocal() as session:
             for finding in findings:
@@ -66,46 +93,83 @@ class FindingRepository:
                     discovered_at=obs.discovered_at,
                 )
                 session.merge(record)
+                if scoped:
+                    session.merge(
+                        FindingScopeRecord(
+                            finding_id=obs.id,
+                            workspace_id=workspace_id,
+                            managed_asset_id=managed_asset_id,
+                            scan_job_id=scan_job_id,
+                        )
+                    )
                 count += 1
             session.commit()
         return count
 
-    def list_findings(self, *, limit: int = 200) -> list[Finding]:
+    def list_findings(
+        self,
+        *,
+        limit: int = 200,
+        workspace_id: str | None = None,
+    ) -> list[Finding]:
         with self.SessionLocal() as session:
+            statement = select(FindingRecord)
+            if workspace_id is not None:
+                statement = statement.join(
+                    FindingScopeRecord,
+                    FindingScopeRecord.finding_id == FindingRecord.id,
+                ).where(FindingScopeRecord.workspace_id == workspace_id)
             rows = session.scalars(
-                select(FindingRecord).order_by(FindingRecord.risk_score.desc()).limit(limit)
+                statement.order_by(FindingRecord.risk_score.desc()).limit(limit)
             ).all()
             return [Finding.model_validate(json.loads(row.payload)) for row in rows]
 
     def clear(self) -> None:
         with self.SessionLocal() as session:
+            session.query(FindingScopeRecord).delete()
             session.query(FindingRecord).delete()
             session.commit()
 
-    def summary(self) -> DashboardSummary:
+    def summary(self, *, workspace_id: str | None = None) -> DashboardSummary:
         with self.SessionLocal() as session:
-            total = session.scalar(select(func.count()).select_from(FindingRecord)) or 0
-            severity_counts = dict(
-                session.execute(
-                    select(FindingRecord.severity, func.count()).group_by(FindingRecord.severity)
-                ).all()
-            )
-            quantum_vulnerable = session.scalar(
-                select(func.count())
-                .select_from(FindingRecord)
-                .where(FindingRecord.quantum_status == "vulnerable")
-            ) or 0
-            pqc_ready = session.scalar(
-                select(func.count())
-                .select_from(FindingRecord)
-                .where(FindingRecord.quantum_status == "safe")
-            ) or 0
+            if workspace_id is None:
+                count_from = FindingRecord
+                severity_statement = select(FindingRecord.severity, func.count()).group_by(
+                    FindingRecord.severity
+                )
+                quantum_statement = select(FindingRecord.quantum_status, func.count()).group_by(
+                    FindingRecord.quantum_status
+                )
+                total = session.scalar(select(func.count()).select_from(count_from)) or 0
+            else:
+                scoped_ids = (
+                    select(FindingScopeRecord.finding_id)
+                    .where(FindingScopeRecord.workspace_id == workspace_id)
+                    .subquery()
+                )
+                filter_clause = FindingRecord.id.in_(select(scoped_ids.c.finding_id))
+                total = session.scalar(
+                    select(func.count()).select_from(FindingRecord).where(filter_clause)
+                ) or 0
+                severity_statement = (
+                    select(FindingRecord.severity, func.count())
+                    .where(filter_clause)
+                    .group_by(FindingRecord.severity)
+                )
+                quantum_statement = (
+                    select(FindingRecord.quantum_status, func.count())
+                    .where(filter_clause)
+                    .group_by(FindingRecord.quantum_status)
+                )
+
+            severity_counts = dict(session.execute(severity_statement).all())
+            quantum_counts = dict(session.execute(quantum_statement).all())
             return DashboardSummary(
                 total_findings=total,
                 critical=severity_counts.get(Severity.CRITICAL.value, 0),
                 high=severity_counts.get(Severity.HIGH.value, 0),
                 medium=severity_counts.get(Severity.MEDIUM.value, 0),
                 low=severity_counts.get(Severity.LOW.value, 0),
-                quantum_vulnerable=quantum_vulnerable,
-                pqc_ready=pqc_ready,
+                quantum_vulnerable=quantum_counts.get("vulnerable", 0),
+                pqc_ready=quantum_counts.get("safe", 0),
             )
