@@ -3,7 +3,17 @@ from __future__ import annotations
 import math
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, delete, func, select, update
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    delete,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -171,7 +181,9 @@ class QuotaRepository:
                 .where(ScanJobRecord.status == ScanStatus.RUNNING.value)
                 .group_by(ScanJobRecord.workspace_id)
             ).all()
-            active_by_workspace = {workspace_id: int(count) for workspace_id, count in active_rows}
+            active_by_workspace = {
+                workspace_id: int(count) for workspace_id, count in active_rows
+            }
             changed = 0
             for workspace_id in workspace_ids:
                 row = session.get(WorkspaceRuntimeRecord, workspace_id)
