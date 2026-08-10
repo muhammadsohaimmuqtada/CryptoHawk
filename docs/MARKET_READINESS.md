@@ -23,7 +23,7 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 
 - [x] Authentication and API-key support
 - [x] Workspace membership and RBAC enforced at service/data layers
-- [ ] Audit log for security-sensitive and administrative actions
+- [x] Audit log for security-sensitive and administrative actions
 - [ ] Rate limits, request quotas, and scan concurrency controls
 - [ ] Secret handling policy and encrypted connector credentials
 - [ ] Database migrations with tested upgrade/rollback path
