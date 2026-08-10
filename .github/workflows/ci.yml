@@ -5,7 +5,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   backend:
@@ -47,17 +47,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
-      - name: Commit generated frontend lockfile to this branch
-        if: github.event_name == 'pull_request' && github.head_ref == 'agent/migrations-supply-chain'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          content="$(base64 -w0 package-lock.json)"
-          gh api --method PUT \
-            "repos/${GITHUB_REPOSITORY}/contents/frontend/package-lock.json" \
-            -f message='lock frontend dependencies' \
-            -f content="$content" \
-            -f branch="$GITHUB_HEAD_REF"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run build
