@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cryptohawk
+      POSTGRES_USER: cryptohawk
+      POSTGRES_PASSWORD: cryptohawk-dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptohawk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - cryptohawk-db:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
+      CRYPTOHAWK_CORS_ORIGINS: http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+
+volumes:
+  cryptohawk-db:
