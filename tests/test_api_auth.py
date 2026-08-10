@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 import cryptohawk.api.app as api_module
 import cryptohawk.api.auth as auth_module
-from cryptohawk.domain.auth import WorkspaceRole
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.tls import TLSScanner
