@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import DateTime as TypingDateTime
+from datetime import datetime
 
 from sqlalchemy import DateTime, String, Text, select
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,7 +26,7 @@ class AuditEventRecord(Base):
     resource_id: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     outcome: Mapped[str] = mapped_column(String(20), index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[TypingDateTime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class AuditRepository:
