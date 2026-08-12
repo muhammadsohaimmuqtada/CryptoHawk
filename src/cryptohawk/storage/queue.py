@@ -9,6 +9,7 @@ from cryptohawk.domain.inventory import ScanJob, ScanKind, ScanStatus
 from cryptohawk.domain.queue import ScanLease, ScanQueueState
 from cryptohawk.storage.database import Base
 from cryptohawk.storage.inventory import InventoryRepository, ScanJobRecord
+from cryptohawk.storage.quotas import QuotaRepository
 from cryptohawk.storage.time import as_utc
 
 
@@ -34,8 +35,13 @@ class ScanQueueRecord(Base):
 
 
 class ScanQueueRepository:
-    def __init__(self, inventory: InventoryRepository) -> None:
+    def __init__(
+        self,
+        inventory: InventoryRepository,
+        quota: QuotaRepository | None = None,
+    ) -> None:
         self.inventory = inventory
+        self.quota = quota
         self.engine = inventory.engine
         self.SessionLocal = inventory.SessionLocal
 
@@ -77,18 +83,23 @@ class ScanQueueRepository:
         *,
         worker_id: str,
         lease_seconds: int = 60,
+        concurrency_limit: int | None = None,
         now: datetime | None = None,
     ) -> ScanLease | None:
         if not worker_id.strip():
             raise ValueError("worker_id is required")
         if not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be between 5 and 3600")
+        if self.quota is not None and concurrency_limit is None:
+            raise ValueError("concurrency_limit is required for quota-aware queue claims")
+        if concurrency_limit is not None and concurrency_limit < 1:
+            raise ValueError("concurrency_limit must be positive")
         now = now or datetime.now(UTC)
         lease_expires_at = now + timedelta(seconds=lease_seconds)
 
         with self.SessionLocal() as session:
-            candidate_ids = session.scalars(
-                select(ScanQueueRecord.job_id)
+            candidates = session.execute(
+                select(ScanQueueRecord.job_id, ScanJobRecord.workspace_id)
                 .join(ScanJobRecord, ScanJobRecord.id == ScanQueueRecord.job_id)
                 .where(
                     ScanJobRecord.status == ScanStatus.QUEUED.value,
@@ -101,40 +112,60 @@ class ScanQueueRepository:
                 .limit(20)
             ).all()
 
-            for job_id in candidate_ids:
-                queue_update = session.execute(
-                    update(ScanQueueRecord)
-                    .where(
-                        ScanQueueRecord.job_id == job_id,
-                        ScanQueueRecord.lease_owner.is_(None),
-                        ScanQueueRecord.cancel_requested.is_(False),
-                        ScanQueueRecord.next_attempt_at <= now,
-                        ScanQueueRecord.attempts < ScanQueueRecord.max_attempts,
-                    )
-                    .values(
-                        lease_owner=worker_id,
-                        lease_expires_at=lease_expires_at,
-                        last_heartbeat_at=now,
-                        attempts=ScanQueueRecord.attempts + 1,
-                    )
+        for job_id, workspace_id in candidates:
+            slot_acquired = False
+            if self.quota is not None:
+                slot_acquired = self.quota.acquire_scan_slot(
+                    workspace_id=workspace_id,
+                    limit=concurrency_limit or 1,
+                    now=now,
                 )
-                if queue_update.rowcount != 1:
-                    session.rollback()
+                if not slot_acquired:
                     continue
 
-                job_update = session.execute(
-                    update(ScanJobRecord)
-                    .where(
-                        ScanJobRecord.id == job_id,
-                        ScanJobRecord.status == ScanStatus.QUEUED.value,
+            try:
+                with self.SessionLocal() as session:
+                    queue_update = session.execute(
+                        update(ScanQueueRecord)
+                        .where(
+                            ScanQueueRecord.job_id == job_id,
+                            ScanQueueRecord.lease_owner.is_(None),
+                            ScanQueueRecord.cancel_requested.is_(False),
+                            ScanQueueRecord.next_attempt_at <= now,
+                            ScanQueueRecord.attempts < ScanQueueRecord.max_attempts,
+                        )
+                        .values(
+                            lease_owner=worker_id,
+                            lease_expires_at=lease_expires_at,
+                            last_heartbeat_at=now,
+                            attempts=ScanQueueRecord.attempts + 1,
+                        )
                     )
-                    .values(status=ScanStatus.RUNNING.value, started_at=now)
-                )
-                if job_update.rowcount != 1:
-                    session.rollback()
-                    continue
-                session.commit()
-                return self._lease_from_job_id(job_id, worker_id)
+                    if queue_update.rowcount != 1:
+                        session.rollback()
+                        if slot_acquired:
+                            self._release_capacity(workspace_id, now)
+                        continue
+
+                    job_update = session.execute(
+                        update(ScanJobRecord)
+                        .where(
+                            ScanJobRecord.id == job_id,
+                            ScanJobRecord.status == ScanStatus.QUEUED.value,
+                        )
+                        .values(status=ScanStatus.RUNNING.value, started_at=now)
+                    )
+                    if job_update.rowcount != 1:
+                        session.rollback()
+                        if slot_acquired:
+                            self._release_capacity(workspace_id, now)
+                        continue
+                    session.commit()
+            except Exception:
+                if slot_acquired:
+                    self._release_capacity(workspace_id, now)
+                raise
+            return self._lease_from_job_id(job_id, worker_id)
         return None
 
     def heartbeat(
@@ -206,6 +237,10 @@ class ScanQueueRepository:
 
         if retryable and state.attempts < state.max_attempts:
             with self.SessionLocal() as session:
+                job = session.get(ScanJobRecord, job_id)
+                if job is None:
+                    raise LookupError("scan job not found")
+                workspace_id = job.workspace_id
                 job_update = session.execute(
                     update(ScanJobRecord)
                     .where(
@@ -231,6 +266,7 @@ class ScanQueueRepository:
                     session.rollback()
                     raise RuntimeError("scan job state changed while scheduling retry")
                 session.commit()
+            self._release_capacity(workspace_id, now)
             job = self._get_job(job_id)
             if job is None:
                 raise RuntimeError("scan job disappeared after retry scheduling")
@@ -304,6 +340,7 @@ class ScanQueueRepository:
         now = now or datetime.now(UTC)
         requeued = 0
         failed = 0
+        released_workspaces: list[str] = []
         with self.SessionLocal() as session:
             rows = session.execute(
                 select(ScanQueueRecord, ScanJobRecord)
@@ -315,6 +352,7 @@ class ScanQueueRepository:
                 )
             ).all()
             for queue, job in rows:
+                released_workspaces.append(job.workspace_id)
                 queue.lease_owner = None
                 queue.lease_expires_at = None
                 queue.last_heartbeat_at = None
@@ -332,6 +370,8 @@ class ScanQueueRepository:
                     queue.next_attempt_at = now
                     requeued += 1
             session.commit()
+        for workspace_id in released_workspaces:
+            self._release_capacity(workspace_id, now)
         return requeued, failed
 
     def get_state(self, job_id: str) -> ScanQueueState | None:
@@ -353,6 +393,10 @@ class ScanQueueRepository:
             raise ValueError("finish status must be terminal")
         now = now or datetime.now(UTC)
         with self.SessionLocal() as session:
+            job = session.get(ScanJobRecord, job_id)
+            if job is None:
+                raise LookupError("scan job not found")
+            workspace_id = job.workspace_id
             job_update = session.execute(
                 update(ScanJobRecord)
                 .where(
@@ -382,10 +426,15 @@ class ScanQueueRepository:
                 session.rollback()
                 raise RuntimeError("scan job or lease ownership changed before completion")
             session.commit()
+        self._release_capacity(workspace_id, now)
         job = self._get_job(job_id)
         if job is None:
             raise RuntimeError("scan job disappeared after completion")
         return job
+
+    def _release_capacity(self, workspace_id: str, now: datetime) -> None:
+        if self.quota is not None:
+            self.quota.release_scan_slot(workspace_id=workspace_id, now=now)
 
     def _lease_from_job_id(self, job_id: str, worker_id: str) -> ScanLease:
         job = self._get_job(job_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ScanJob, ScanStatus
 from cryptohawk.domain.models import Finding
 from cryptohawk.risk.engine import RiskEngine
@@ -14,6 +15,7 @@ from cryptohawk.services.executor import (
 )
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.quotas import QuotaRepository
 
 
 class ScanJobService:
@@ -26,9 +28,11 @@ class ScanJobService:
         risk_engine: RiskEngineProtocol | None = None,
         source_scanner: SourceScannerProtocol | None = None,
         tls_scanner: TLSScannerProtocol | None = None,
+        quota: QuotaRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.findings = findings
+        self.quota = quota
         self.executor = executor or AssetScanExecutor(
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
@@ -48,48 +52,58 @@ class ScanJobService:
         if asset is None:
             raise LookupError("asset not found in workspace")
 
-        job = self.inventory.create_scan_job(
-            workspace_id=workspace_id,
-            asset_id=asset_id,
-            kind=self.executor.scan_kind(asset),
-        )
-        self.inventory.transition_scan_job(
-            workspace_id=workspace_id,
-            job_id=job.id,
-            expected=ScanStatus.QUEUED,
-            target=ScanStatus.RUNNING,
-        )
+        if self.quota is not None:
+            self.quota.require_scan_slot(
+                workspace_id=workspace_id,
+                limit=settings.workspace_scan_concurrency,
+            )
 
         try:
-            results = self.executor.execute(
-                asset,
-                source=source,
-                filename=filename,
-                timeout=timeout,
-            )
-            self.findings.upsert_many(
-                results,
+            job = self.inventory.create_scan_job(
                 workspace_id=workspace_id,
-                managed_asset_id=asset.id,
-                scan_job_id=job.id,
+                asset_id=asset_id,
+                kind=self.executor.scan_kind(asset),
             )
-            job = self.inventory.transition_scan_job(
-                workspace_id=workspace_id,
-                job_id=job.id,
-                expected=ScanStatus.RUNNING,
-                target=ScanStatus.SUCCEEDED,
-                findings_count=len(results),
-            )
-            return job, results
-        except Exception as exc:
             self.inventory.transition_scan_job(
                 workspace_id=workspace_id,
                 job_id=job.id,
-                expected=ScanStatus.RUNNING,
-                target=ScanStatus.FAILED,
-                error_message=str(exc),
+                expected=ScanStatus.QUEUED,
+                target=ScanStatus.RUNNING,
             )
-            raise
+
+            try:
+                results = self.executor.execute(
+                    asset,
+                    source=source,
+                    filename=filename,
+                    timeout=timeout,
+                )
+                self.findings.upsert_many(
+                    results,
+                    workspace_id=workspace_id,
+                    managed_asset_id=asset.id,
+                    scan_job_id=job.id,
+                )
+                job = self.inventory.transition_scan_job(
+                    workspace_id=workspace_id,
+                    job_id=job.id,
+                    expected=ScanStatus.RUNNING,
+                    target=ScanStatus.SUCCEEDED,
+                    findings_count=len(results),
+                )
+                return job, results
+            except Exception as exc:
+                self.inventory.transition_scan_job(
+                    workspace_id=workspace_id,
+                    job_id=job.id,
+                    expected=ScanStatus.RUNNING,
+                    target=ScanStatus.FAILED,
+                    error_message=str(exc),
+                )
+                raise
+        finally:
+            if self.quota is not None:
+                self.quota.release_scan_slot(workspace_id=workspace_id)
 
 
 __all__ = ["AssetScanError", "ScanJobService"]

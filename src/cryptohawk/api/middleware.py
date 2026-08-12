@@ -74,7 +74,7 @@ class SecurityAuditMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _outcome(status_code: int) -> AuditOutcome:
-        if status_code in {401, 403}:
+        if status_code in {401, 403, 429}:
             return AuditOutcome.DENIED
         if status_code < 400:
             return AuditOutcome.SUCCESS

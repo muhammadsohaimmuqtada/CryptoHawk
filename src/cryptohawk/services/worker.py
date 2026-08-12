@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 
+from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ManagedAssetKind
 from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
 from cryptohawk.storage.database import FindingRepository
@@ -55,6 +56,7 @@ class ScanWorker:
         lease = self.queue.claim_next(
             worker_id=self.config.worker_id,
             lease_seconds=self.config.lease_seconds,
+            concurrency_limit=settings.workspace_scan_concurrency,
         )
         if lease is None:
             return False
