@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from cryptohawk import __version__
 from cryptohawk.api.auth import (
     auth_repo,
     get_current_principal,
+    get_quota_repository,
     inventory,
     require_workspace_role,
 )
@@ -41,15 +43,18 @@ from cryptohawk.domain.auth import (
 )
 from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanJob, Workspace
 from cryptohawk.domain.models import DashboardSummary, Finding
+from cryptohawk.domain.quotas import ScanCapacity
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.scan_jobs import AssetScanError, ScanJobService
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.queue import ScanQueueRepository
+from cryptohawk.storage.quotas import ScanCapacityExceeded
 
 repo = FindingRepository(settings.database_url)
-scan_queue = ScanQueueRepository(inventory)
+quota_repo = get_quota_repository()
+scan_queue = ScanQueueRepository(inventory, quota_repo)
 risk_engine = RiskEngine()
 source_scanner = SourceScanner()
 tls_scanner = TLSScanner(allow_private_targets=settings.allow_private_targets)
@@ -60,6 +65,7 @@ scan_jobs = ScanJobService(
     risk_engine=risk_engine,
     source_scanner=source_scanner,
     tls_scanner=tls_scanner,
+    quota=quota_repo,
 )
 
 ViewerPrincipal = Annotated[
@@ -80,6 +86,7 @@ AdminPrincipal = Annotated[
 async def lifespan(_: FastAPI):
     inventory.create_schema()
     repo.create_schema()
+    get_quota_repository().create_schema()
     scan_queue.create_schema()
     auth_repo.create_schema()
     audit_repo.create_schema()
@@ -128,6 +135,48 @@ def _require_scan_job(workspace_id: str, job_id: str) -> ScanJob:
     return job
 
 
+def _hashed_scope(*parts: str) -> str:
+    material = "|".join(part.strip().lower() for part in parts)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _peer_host(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
+
+
+def _enforce_rate_limit(
+    *,
+    scope_key: str,
+    action: str,
+    limit: int,
+    window_seconds: int,
+    detail: str,
+) -> None:
+    decision = get_quota_repository().consume(
+        scope_key=scope_key,
+        action=action,
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if decision.allowed:
+        return
+    raise HTTPException(
+        status_code=429,
+        detail=detail,
+        headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+    )
+
+
+def _enforce_scan_submission(workspace_id: str) -> None:
+    _enforce_rate_limit(
+        scope_key=f"workspace:{workspace_id}",
+        action="scan-submit",
+        limit=settings.scan_submissions_per_minute,
+        window_seconds=60,
+        detail="workspace scan submission quota exceeded",
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str | bool]:
     return {
@@ -148,7 +197,14 @@ def auth_status() -> dict[str, bool]:
     response_model=IssuedToken,
     status_code=status.HTTP_201_CREATED,
 )
-def bootstrap(request: BootstrapRequest) -> IssuedToken:
+def bootstrap(request: BootstrapRequest, http_request: Request) -> IssuedToken:
+    _enforce_rate_limit(
+        scope_key=f"bootstrap:{_hashed_scope(_peer_host(http_request))}",
+        action="bootstrap",
+        limit=settings.bootstrap_attempts_per_hour,
+        window_seconds=3600,
+        detail="bootstrap attempt quota exceeded",
+    )
     try:
         return auth_repo.bootstrap(
             email=request.email,
@@ -165,7 +221,14 @@ def bootstrap(request: BootstrapRequest) -> IssuedToken:
 
 
 @app.post("/api/v1/auth/login", response_model=IssuedToken)
-def login(request: LoginRequest) -> IssuedToken:
+def login(request: LoginRequest, http_request: Request) -> IssuedToken:
+    _enforce_rate_limit(
+        scope_key=f"login:{_hashed_scope(_peer_host(http_request), request.email)}",
+        action="login",
+        limit=settings.login_attempts_per_15_minutes,
+        window_seconds=900,
+        detail="login attempt quota exceeded",
+    )
     try:
         return auth_repo.login(
             email=request.email,
@@ -409,6 +472,7 @@ def run_managed_scan(
     _principal: AnalystPrincipal,
 ) -> ScanExecutionResponse:
     _require_workspace(workspace_id)
+    _enforce_scan_submission(workspace_id)
     try:
         job, findings = scan_jobs.run(
             workspace_id=workspace_id,
@@ -419,6 +483,12 @@ def run_managed_scan(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ScanCapacityExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
     except (AssetScanError, OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ScanExecutionResponse(job=job, findings=findings)
@@ -436,6 +506,7 @@ def enqueue_managed_scan(
     _principal: AnalystPrincipal,
 ) -> ScanJob:
     _require_workspace(workspace_id)
+    _enforce_scan_submission(workspace_id)
     asset = _require_asset(workspace_id, asset_id)
     if asset.kind == ManagedAssetKind.SOURCE:
         raise HTTPException(
@@ -452,6 +523,21 @@ def enqueue_managed_scan(
         )
     except AssetScanError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/workspaces/{workspace_id}/scan-capacity",
+    response_model=ScanCapacity,
+)
+def get_scan_capacity(
+    workspace_id: str,
+    _principal: ViewerPrincipal,
+) -> ScanCapacity:
+    _require_workspace(workspace_id)
+    return get_quota_repository().scan_capacity(
+        workspace_id=workspace_id,
+        limit=settings.workspace_scan_concurrency,
+    )
 
 
 @app.get(

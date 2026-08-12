@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     allow_legacy_global_api: bool = False
     auto_create_schema: bool = True
     session_hours: int = 12
+    principal_requests_per_minute: int = 600
+    workspace_requests_per_minute: int = 300
+    login_attempts_per_15_minutes: int = 10
+    bootstrap_attempts_per_hour: int = 5
+    scan_submissions_per_minute: int = 30
+    workspace_scan_concurrency: int = 4
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
 

@@ -23,6 +23,10 @@ from cryptohawk.storage.database import Base
 from cryptohawk.storage.inventory import InventoryRepository, ScanJobRecord, WorkspaceRecord
 
 
+class ScanCapacityExceeded(RuntimeError):
+    """Raised when a workspace has no remaining running-scan capacity."""
+
+
 class RateLimitBucketRecord(Base):
     __tablename__ = "rate_limit_buckets"
 
@@ -131,6 +135,17 @@ class QuotaRepository:
             )
             session.commit()
             return result.rowcount == 1
+
+    def require_scan_slot(
+        self,
+        *,
+        workspace_id: str,
+        limit: int,
+        now: datetime | None = None,
+    ) -> None:
+        if self.acquire_scan_slot(workspace_id=workspace_id, limit=limit, now=now):
+            return
+        raise ScanCapacityExceeded("workspace scan concurrency limit exceeded")
 
     def release_scan_slot(
         self,
@@ -304,3 +319,6 @@ class QuotaRepository:
                 session.commit()
             except IntegrityError:
                 session.rollback()
+
+
+__all__ = ["QuotaRepository", "ScanCapacityExceeded"]
