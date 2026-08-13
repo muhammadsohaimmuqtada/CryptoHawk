@@ -4,15 +4,17 @@ from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ScanJob, ScanStatus
 from cryptohawk.domain.models import Finding
 from cryptohawk.risk.engine import RiskEngine
+from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import SourceScanner
+from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.executor import (
     AssetScanError,
     AssetScanExecutor,
+    EndpointScannerProtocol,
     RepositoryScannerProtocol,
     RiskEngineProtocol,
     SourceScannerProtocol,
-    TLSScannerProtocol,
 )
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
@@ -30,7 +32,9 @@ class ScanJobService:
         risk_engine: RiskEngineProtocol | None = None,
         source_scanner: SourceScannerProtocol | None = None,
         repository_scanner: RepositoryScannerProtocol | None = None,
-        tls_scanner: TLSScannerProtocol | None = None,
+        tls_scanner: EndpointScannerProtocol | None = None,
+        certificate_scanner: EndpointScannerProtocol | None = None,
+        ssh_scanner: EndpointScannerProtocol | None = None,
         quota: QuotaRepository | None = None,
         history: ContinuousRepository | None = None,
     ) -> None:
@@ -46,7 +50,12 @@ class ScanJobService:
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
             repository_scanner=repository_scanner,
-            tls_scanner=tls_scanner or TLSScanner(),
+            tls_scanner=tls_scanner
+            or TLSScanner(allow_private_targets=settings.allow_private_targets),
+            certificate_scanner=certificate_scanner
+            or CertificateScanner(allow_private_targets=settings.allow_private_targets),
+            ssh_scanner=ssh_scanner
+            or SSHScanner(allow_private_targets=settings.allow_private_targets),
         )
 
     def run(

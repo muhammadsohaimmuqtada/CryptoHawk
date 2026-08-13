@@ -4,6 +4,7 @@ from cryptohawk.domain.models import (
     CryptoAssetType,
     CryptoObservation,
     Finding,
+    Primitive,
     QuantumStatus,
     RiskAssessment,
     ScanContext,
@@ -35,7 +36,11 @@ class RiskEngine:
       asset criticality:      0..10
     """
 
-    def assess(self, observation: CryptoObservation, context: ScanContext | None = None) -> Finding:
+    def assess(
+        self,
+        observation: CryptoObservation,
+        context: ScanContext | None = None,
+    ) -> Finding:
         context = context or ScanContext()
         profile = get_profile(observation.family)
         reasons: list[str] = []
@@ -93,6 +98,13 @@ class RiskEngine:
                 reasons.append(
                     f"{profile.family} is a post-quantum or high-margin primitive in this policy"
                 )
+
+        if observation.family == "RSA" and observation.primitive == Primitive.SIGNATURE:
+            migration_target = "ML-DSA"
+            migration_strategy = (
+                "Migrate RSA signatures to ML-DSA; retain controlled hybrid verification "
+                "during transition"
+            )
 
         # Parameter-sensitive rules override family defaults where evidence is stronger.
         if observation.family == "RSA" and observation.key_size:

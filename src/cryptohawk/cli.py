@@ -13,9 +13,12 @@ from cryptohawk.api.app import app
 from cryptohawk.cbom.exporter import CycloneDXExporter
 from cryptohawk.config import settings
 from cryptohawk.risk.engine import RiskEngine
+from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import SourceScanner
+from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.executor import AssetScanExecutor
+from cryptohawk.services.repository_runtime import build_repository_scanner
 from cryptohawk.services.scheduler import ScanScheduler, SchedulerConfig
 from cryptohawk.services.worker import ScanWorker, WorkerConfig
 from cryptohawk.storage.continuous import ContinuousRepository
@@ -51,6 +54,22 @@ def main() -> None:
     tls.add_argument("hostname")
     tls.add_argument("--port", type=int, default=443)
     tls.add_argument("--no-persist", action="store_true")
+
+    certificate = sub.add_parser(
+        "scan-certificate",
+        help="Inventory X.509 certificate cryptography exposed by a TLS endpoint",
+    )
+    certificate.add_argument("hostname")
+    certificate.add_argument("--port", type=int, default=443)
+    certificate.add_argument("--no-persist", action="store_true")
+
+    ssh = sub.add_parser(
+        "scan-ssh",
+        help="Inspect SSH server host-key cryptography without authentication",
+    )
+    ssh.add_argument("hostname")
+    ssh.add_argument("--port", type=int, default=22)
+    ssh.add_argument("--no-persist", action="store_true")
 
     cbom = sub.add_parser("export-cbom", help="Export persistent inventory as CycloneDX 1.7 CBOM")
     cbom.add_argument("--output", default="cryptohawk-cbom.json")
@@ -103,6 +122,18 @@ def main() -> None:
         if not args.no_persist:
             repo.upsert_many(findings)
         _print(findings)
+    elif args.command == "scan-certificate":
+        scanner = CertificateScanner(allow_private_targets=settings.allow_private_targets)
+        findings = [engine.assess(obs) for obs in scanner.scan(args.hostname, args.port)]
+        if not args.no_persist:
+            repo.upsert_many(findings)
+        _print(findings)
+    elif args.command == "scan-ssh":
+        scanner = SSHScanner(allow_private_targets=settings.allow_private_targets)
+        findings = [engine.assess(obs) for obs in scanner.scan(args.hostname, args.port)]
+        if not args.no_persist:
+            repo.upsert_many(findings)
+        _print(findings)
     elif args.command == "export-cbom":
         document = CycloneDXExporter().export(repo.list_findings(limit=5000))
         with open(args.output, "w", encoding="utf-8") as handle:
@@ -128,7 +159,12 @@ def main() -> None:
         executor = AssetScanExecutor(
             risk_engine=engine,
             source_scanner=SourceScanner(),
+            repository_scanner=build_repository_scanner(inventory, continuous),
             tls_scanner=TLSScanner(allow_private_targets=settings.allow_private_targets),
+            certificate_scanner=CertificateScanner(
+                allow_private_targets=settings.allow_private_targets
+            ),
+            ssh_scanner=SSHScanner(allow_private_targets=settings.allow_private_targets),
         )
         if args.command == "worker":
             runner = ScanWorker(

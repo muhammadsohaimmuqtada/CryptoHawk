@@ -17,6 +17,8 @@ class ManagedAssetKind(StrEnum):
     SOURCE = "source"
     REPOSITORY = "repository"
     TLS_ENDPOINT = "tls-endpoint"
+    CERTIFICATE_ENDPOINT = "certificate-endpoint"
+    SSH_ENDPOINT = "ssh-endpoint"
     HOST = "host"
     CONTAINER = "container"
     KUBERNETES = "kubernetes"
@@ -27,6 +29,8 @@ class ScanKind(StrEnum):
     SOURCE = "source"
     REPOSITORY = "repository"
     TLS = "tls"
+    CERTIFICATE = "certificate"
+    SSH = "ssh"
 
 
 class ScanStatus(StrEnum):

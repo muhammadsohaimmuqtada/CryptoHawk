@@ -125,6 +125,24 @@ PROFILES: dict[str, AlgorithmProfile] = {
         security_bits=128,
         weakness_weight=18,
     ),
+    "ED25519": _profile(
+        "ED25519",
+        Primitive.SIGNATURE,
+        QuantumStatus.VULNERABLE,
+        migration_target="ML-DSA",
+        migration_strategy="Migrate signatures to ML-DSA with a controlled hybrid transition",
+        security_bits=128,
+        weakness_weight=18,
+    ),
+    "ED448": _profile(
+        "ED448",
+        Primitive.SIGNATURE,
+        QuantumStatus.VULNERABLE,
+        migration_target="ML-DSA",
+        migration_strategy="Migrate signatures to ML-DSA with a controlled hybrid transition",
+        security_bits=224,
+        weakness_weight=18,
+    ),
     "ECDH": _profile(
         "ECDH",
         Primitive.KEY_AGREE,
@@ -220,6 +238,7 @@ ALIASES: dict[str, str] = {
     "DILITHIUM": "ML-DSA",
     "CRYSTALS-DILITHIUM": "ML-DSA",
     "SPHINCS+": "SLH-DSA",
+    "SSH-ED25519": "ED25519",
 }
 
 
@@ -235,6 +254,10 @@ def normalize_family(value: str) -> str:
         return "ECDSA"
     if token.startswith("ECDH"):
         return "ECDH"
+    if token.startswith("ED25519"):
+        return "ED25519"
+    if token.startswith("ED448"):
+        return "ED448"
     if token.startswith("ML-KEM"):
         return "ML-KEM"
     if token.startswith("ML-DSA"):

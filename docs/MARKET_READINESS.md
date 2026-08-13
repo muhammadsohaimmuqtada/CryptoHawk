@@ -15,9 +15,11 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Workspaces, managed assets, tenant-scoped findings, and scan-job state
 - [x] Durable worker queue with leases, retries, cancellation, and crash recovery
 - [x] Scheduled scans and drift detection
-- [ ] Repository-native collector with commit identity and incremental scanning
-- [ ] Certificate-estate and SSH collectors
+- [x] Repository-native collector with commit identity and incremental scanning
+- [x] Certificate-estate and SSH collectors
 - [ ] Container/image collector
+
+Repository scanning supports safe HTTPS Git acquisition, encrypted GitHub/GitLab credentials, full-to-incremental rescans, commit provenance, and drift/history reconciliation. Certificate-estate scanning inventories leaf X.509 key material and signature hashes even when trust validation would fail; SSH scanning negotiates transport only far enough to collect the server host key and does not authenticate or execute commands.
 
 ### P0 — security boundary
 
