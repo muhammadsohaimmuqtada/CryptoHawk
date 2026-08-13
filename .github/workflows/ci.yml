@@ -72,11 +72,14 @@ jobs:
           key=$(python -c 'from cryptohawk.security.secrets import VersionedAesGcmCipher; print(VersionedAesGcmCipher.generate_key())')
           echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_KEYS=1:${key}" >> "$GITHUB_ENV"
           echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_ACTIVE_VERSION=1" >> "$GITHUB_ENV"
-      - name: Migrate and seed source database
+      - name: Migrate source database
+        env:
+          CRYPTOHAWK_DATABASE_URL: ${{ env.SOURCE_APP_URL }}
+        run: alembic upgrade head
+      - name: Seed representative CryptoHawk state
         env:
           CRYPTOHAWK_DATABASE_URL: ${{ env.SOURCE_APP_URL }}
         run: |
-          alembic upgrade head
           mkdir -p .dr
           python scripts/postgres_dr_fixture.py seed .dr/fixture.json
       - name: Create and validate PostgreSQL 17 custom backup
