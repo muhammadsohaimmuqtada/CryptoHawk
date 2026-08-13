@@ -14,6 +14,7 @@ from cryptohawk.storage import credentials as credential_storage  # noqa: F401
 from cryptohawk.storage import inventory as inventory_storage  # noqa: F401
 from cryptohawk.storage import queue as queue_storage  # noqa: F401
 from cryptohawk.storage import quotas as quota_storage  # noqa: F401
+from cryptohawk.storage import repositories as repository_storage  # noqa: F401
 from cryptohawk.storage.database import Base
 
 config = context.config
@@ -103,7 +104,14 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        _ensure_version_table_capacity(connection)
+        # SQLAlchemy 2.x autobegins a transaction for inspection/DDL. Commit the
+        # version-table compatibility preflight explicitly before handing
+        # transaction ownership to Alembic. Without this boundary, PostgreSQL can
+        # report successful migration steps and then roll the whole schema back
+        # when the connection context closes.
+        with connection.begin():
+            _ensure_version_table_capacity(connection)
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
