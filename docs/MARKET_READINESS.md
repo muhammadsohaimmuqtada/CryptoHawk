@@ -56,11 +56,13 @@ Continuous scanning uses deterministic schedule occurrence IDs and per-scan obse
 
 ### P0 — operator experience
 
-- [ ] Workspace-aware onboarding and asset inventory UI
+- [x] Workspace-aware onboarding and asset inventory UI
 - [ ] Scan history, failure diagnostics, and rerun controls
 - [ ] Migration queue with owner, status, due date, and evidence of remediation
 - [ ] Policy packs and organization-specific crypto baselines
 - [ ] Exportable executive and engineering reports
+
+The authenticated operator surface supports first-run owner bootstrap, workspace creation and switching, guided registration for the five currently executable managed collectors (TLS, certificate estate, SSH, repository and container image), durable first-scan submission, workspace-scoped asset search/filtering, latest scan state and explicit reruns. Repository onboarding uses the repository-native API so commit identity and drift semantics are preserved; inventory-only asset kinds are not misrepresented as executable collectors. The frontend uses local/system typography and does not depend on third-party font delivery.
 
 ## Serious-impact gate
 
