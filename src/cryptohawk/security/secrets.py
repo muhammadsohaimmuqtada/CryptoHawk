@@ -3,8 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -41,7 +41,7 @@ class VersionedAesGcmCipher:
         self.active_version = active_version
 
     @classmethod
-    def from_spec(cls, spec: str, *, active_version: int) -> "VersionedAesGcmCipher":
+    def from_spec(cls, spec: str, *, active_version: int) -> VersionedAesGcmCipher:
         keys: dict[int, bytes] = {}
         for entry in (part.strip() for part in spec.split(",")):
             if not entry:
@@ -85,7 +85,7 @@ class VersionedAesGcmCipher:
             "cryptohawk.connector-credential|v1|"
             f"workspace:{workspace_id}|credential:{credential_id}|"
             f"kind:{kind}|key:{key_version}"
-        ).encode("utf-8")
+        ).encode()
 
     def encrypt(
         self,
