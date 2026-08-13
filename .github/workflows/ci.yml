@@ -17,7 +17,7 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: python -m pip install -e '.[dev]'
-      - run: ruff check src tests migrations
+      - run: ruff check src tests migrations scripts
       - run: pytest --cov=cryptohawk --cov-report=term-missing
       - name: Audit Python dependencies
         run: |
@@ -36,6 +36,104 @@ jobs:
           path: pip-audit.json
           if-no-files-found: ignore
           retention-days: 14
+
+  postgres-dr:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cryptohawk_source
+          POSTGRES_USER: cryptohawk
+          POSTGRES_PASSWORD: cryptohawk-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cryptohawk -d cryptohawk_source"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SOURCE_APP_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_source
+      SOURCE_PG_URL: postgresql://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_source
+      RESTORE_APP_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_restored
+      RESTORE_PG_URL: postgresql://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_restored
+      ADMIN_PG_URL: postgresql://cryptohawk:cryptohawk-ci@127.0.0.1:5432/postgres
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Configure ephemeral connector encryption key
+        run: |
+          key=$(python -c 'from cryptohawk.security.secrets import VersionedAesGcmCipher; print(VersionedAesGcmCipher.generate_key())')
+          echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_KEYS=1:${key}" >> "$GITHUB_ENV"
+          echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_ACTIVE_VERSION=1" >> "$GITHUB_ENV"
+      - name: Migrate and seed source database
+        env:
+          CRYPTOHAWK_DATABASE_URL: ${{ env.SOURCE_APP_URL }}
+        run: |
+          alembic upgrade head
+          mkdir -p .dr
+          python scripts/postgres_dr_fixture.py seed .dr/fixture.json
+      - name: Create and validate PostgreSQL 17 custom backup
+        run: |
+          docker pull postgres:17
+          docker run --rm --network host \
+            -e CRYPTOHAWK_POSTGRES_URL="$SOURCE_PG_URL" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            postgres:17 \
+            bash scripts/postgres_backup.sh .dr/cryptohawk.dump
+      - name: Create pristine restore database
+        run: |
+          docker run --rm --network host postgres:17 \
+            psql "$ADMIN_PG_URL" --no-psqlrc --set=ON_ERROR_STOP=1 \
+            --command="CREATE DATABASE cryptohawk_restored TEMPLATE template0;"
+      - name: Restore backup into clean database
+        run: |
+          docker run --rm --network host \
+            -e CRYPTOHAWK_POSTGRES_URL="$RESTORE_PG_URL" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            postgres:17 \
+            bash scripts/postgres_restore.sh .dr/cryptohawk.dump
+      - name: Verify restored CryptoHawk invariants
+        env:
+          CRYPTOHAWK_DATABASE_URL: ${{ env.RESTORE_APP_URL }}
+        run: python scripts/postgres_dr_fixture.py verify .dr/fixture.json
+      - name: Prove restore refuses a non-empty target
+        run: |
+          if docker run --rm --network host \
+            -e CRYPTOHAWK_POSTGRES_URL="$RESTORE_PG_URL" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            postgres:17 \
+            bash scripts/postgres_restore.sh .dr/cryptohawk.dump; then
+            echo "restore unexpectedly accepted a non-empty target" >&2
+            exit 1
+          fi
+      - name: Prove corrupted backups are rejected
+        run: |
+          cp .dr/cryptohawk.dump .dr/tampered.dump
+          sed 's/cryptohawk.dump/tampered.dump/' \
+            .dr/cryptohawk.dump.sha256 > .dr/tampered.dump.sha256
+          printf 'tampered' >> .dr/tampered.dump
+          if docker run --rm --network host \
+            -e CRYPTOHAWK_POSTGRES_URL="$RESTORE_PG_URL" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            postgres:17 \
+            bash scripts/postgres_restore.sh .dr/tampered.dump; then
+            echo "restore unexpectedly accepted a corrupted backup" >&2
+            exit 1
+          fi
+      - name: Remove ephemeral DR secrets and archives
+        if: always()
+        run: rm -rf .dr
 
   frontend:
     runs-on: ubuntu-latest
