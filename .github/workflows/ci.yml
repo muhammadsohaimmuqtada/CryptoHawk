@@ -139,6 +139,45 @@ jobs:
         if: always()
         run: rm -rf .dr
 
+  postgres-load-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cryptohawk_load
+          POSTGRES_USER: cryptohawk
+          POSTGRES_PASSWORD: cryptohawk-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cryptohawk -d cryptohawk_load"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_load
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Migrate load database
+        run: alembic upgrade head
+      - name: Exercise sustained multi-tenant queue churn
+        run: >-
+          timeout 180s python scripts/postgres_load_soak.py
+          --workspaces 4
+          --assets-per-workspace 40
+          --rounds 5
+          --workers 8
+          --concurrency-per-workspace 4
+          --retry-every 20
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
