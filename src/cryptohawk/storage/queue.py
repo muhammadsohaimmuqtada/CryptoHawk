@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, select, update
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -115,9 +115,22 @@ class ScanQueueRepository:
         now = now or datetime.now(UTC)
         lease_expires_at = now + timedelta(seconds=lease_seconds)
 
+        # Select one oldest eligible job per workspace before applying the global
+        # candidate cap. A globally limited FIFO slice can be filled entirely by
+        # one saturated tenant and starve workspaces that still have capacity.
         with self.SessionLocal() as session:
-            candidates = session.execute(
-                select(ScanQueueRecord.job_id, ScanJobRecord.workspace_id)
+            eligible = (
+                select(
+                    ScanQueueRecord.job_id.label("job_id"),
+                    ScanJobRecord.workspace_id.label("workspace_id"),
+                    ScanJobRecord.requested_at.label("requested_at"),
+                    func.row_number()
+                    .over(
+                        partition_by=ScanJobRecord.workspace_id,
+                        order_by=(ScanJobRecord.requested_at, ScanQueueRecord.job_id),
+                    )
+                    .label("workspace_rank"),
+                )
                 .join(ScanJobRecord, ScanJobRecord.id == ScanQueueRecord.job_id)
                 .where(
                     ScanJobRecord.status == ScanStatus.QUEUED.value,
@@ -126,7 +139,12 @@ class ScanQueueRepository:
                     ScanQueueRecord.next_attempt_at <= now,
                     ScanQueueRecord.attempts < ScanQueueRecord.max_attempts,
                 )
-                .order_by(ScanJobRecord.requested_at, ScanQueueRecord.job_id)
+                .subquery()
+            )
+            candidates = session.execute(
+                select(eligible.c.job_id, eligible.c.workspace_id)
+                .where(eligible.c.workspace_rank == 1)
+                .order_by(eligible.c.requested_at, eligible.c.job_id)
                 .limit(20)
             ).all()
 
