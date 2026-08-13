@@ -85,7 +85,7 @@ class ScanQueueRepository:
             )
             try:
                 session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 session.rollback()
                 existing = session.get(ScanQueueRecord, job.id)
                 if existing is None:
@@ -93,7 +93,7 @@ class ScanQueueRepository:
                 if existing.max_attempts != max_attempts:
                     raise ValueError(
                         "queued scan job already exists with different retry policy"
-                    )
+                    ) from exc
         return job
 
     def claim_next(
