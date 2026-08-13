@@ -42,13 +42,15 @@ Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is 
 - [x] Structured application logs, metrics, traces, and health/readiness probes
 - [x] PostgreSQL backup/restore procedure tested
 - [x] Load and soak tests for realistic asset volumes
-- [ ] Failure injection for worker/network/database interruptions
+- [x] Failure injection for worker/network/database interruptions
 
 Application telemetry uses structured JSON logs with request/trace/job correlation and token redaction, low-cardinality Prometheus metrics without tenant identifiers, OpenTelemetry spans with W3C trace-context continuation and optional OTLP/HTTP export, and separate liveness/readiness probes. API readiness verifies database connectivity and Docker Compose gates the web tier on API readiness.
 
 PostgreSQL disaster recovery uses checksum-protected custom-format backups, refuses non-empty restore targets, restores in a fail-fast single transaction, and is exercised in CI against PostgreSQL 17. The recovery drill verifies restored authentication, workspace/assets, encrypted connector credentials, successful scan evidence/history, schedules, durable queue state, audit events, quota runtime and Alembic revision before the gate passes. The operator procedure is documented in `docs/POSTGRES_DISASTER_RECOVERY.md`.
 
 The PostgreSQL load/soak gate creates a multi-tenant estate and drives sustained durable queue churn through quota-aware claims, heartbeats, transient retries and terminal completion. The CI baseline covers 4 workspaces, 160 managed assets and 800 scan jobs with bounded execution, while validating tenant progress, retry-attempt accounting, stale-lease absence and zero leaked scan capacity. Queue candidate selection is explicitly tested with a saturated tenant backlog deeper than the global candidate window so one tenant cannot hide another tenant that still has capacity.
+
+Failure-injection CI exercises four durability boundaries against PostgreSQL 17: abandoned worker lease recovery, final-attempt lease expiry, transient collector/network failure through the real worker retry path, and a real database stop/restart while a worker owns an active lease. The gate requires replacement-worker recovery, exact retry accounting, SQLAlchemy stale-connection recovery, and zero leaked workspace capacity. The scenarios and limits are documented in `docs/FAILURE_INJECTION.md`.
 
 Continuous scanning uses deterministic schedule occurrence IDs and per-scan observation IDs so scheduler crashes and worker retries do not create duplicate work or evidence. Successful scans retain scanner/policy provenance, observation occurrences, first/last-seen state, evidence hashes, and drift events.
 

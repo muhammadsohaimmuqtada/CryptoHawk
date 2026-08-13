@@ -178,6 +178,48 @@ jobs:
           --concurrency-per-workspace 4
           --retry-every 20
 
+  postgres-failure-injection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cryptohawk_failure
+          POSTGRES_USER: cryptohawk
+          POSTGRES_PASSWORD: cryptohawk-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cryptohawk -d cryptohawk_failure"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_failure
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Migrate failure-injection database
+        run: alembic upgrade head
+      - name: Inject worker, network and database failures
+        run: |
+          postgres_container=$(docker ps \
+            --filter 'ancestor=postgres:17' \
+            --format '{{.ID}}' | head -n 1)
+          if [ -z "$postgres_container" ]; then
+            echo "PostgreSQL service container was not found" >&2
+            exit 1
+          fi
+          timeout 180s python scripts/postgres_failure_injection.py \
+            --database-url "$CRYPTOHAWK_DATABASE_URL" \
+            --postgres-container "$postgres_container"
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
