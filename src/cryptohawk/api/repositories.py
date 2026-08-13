@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from cryptohawk.api.auth import inventory, require_workspace_role
-from cryptohawk.api.continuous import continuous_repo
+from cryptohawk.api.runtime import continuous_repo
 from cryptohawk.api.schemas import RepositoryAssetCreateRequest
 from cryptohawk.domain.auth import Principal, WorkspaceRole
 from cryptohawk.domain.credentials import ConnectorCredentialKind
