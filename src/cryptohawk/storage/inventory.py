@@ -232,12 +232,9 @@ class InventoryRepository:
     ) -> ScanJob:
         if self.get_asset(workspace_id=workspace_id, asset_id=asset_id) is None:
             raise LookupError("asset not found in workspace")
-        job = ScanJob(
-            id=job_id or ScanJob(workspace_id=workspace_id, asset_id=asset_id, kind=kind).id,
-            workspace_id=workspace_id,
-            asset_id=asset_id,
-            kind=kind,
-        )
+        job = ScanJob(workspace_id=workspace_id, asset_id=asset_id, kind=kind)
+        if job_id is not None:
+            job = job.model_copy(update={"id": job_id})
         with self.SessionLocal() as session:
             existing = session.get(ScanJobRecord, job.id)
             if existing is not None:
@@ -252,7 +249,7 @@ class InventoryRepository:
             session.add(self._job_record(job))
             try:
                 session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 session.rollback()
                 existing = session.get(ScanJobRecord, job.id)
                 if existing is None:
@@ -263,7 +260,9 @@ class InventoryRepository:
                     or loaded.asset_id != asset_id
                     or loaded.kind != kind
                 ):
-                    raise ValueError("scan job id is already bound to different work")
+                    raise ValueError(
+                        "scan job id is already bound to different work"
+                    ) from exc
                 return loaded
         return job
 
