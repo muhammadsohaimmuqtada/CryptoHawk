@@ -9,7 +9,11 @@ from cryptohawk.api.continuous import continuous_repo
 from cryptohawk.api.schemas import RepositoryAssetCreateRequest
 from cryptohawk.domain.auth import Principal, WorkspaceRole
 from cryptohawk.domain.credentials import ConnectorCredentialKind
-from cryptohawk.domain.repositories import RepositoryAsset, RepositoryProvider, RepositoryScanProvenance
+from cryptohawk.domain.repositories import (
+    RepositoryAsset,
+    RepositoryProvider,
+    RepositoryScanProvenance,
+)
 from cryptohawk.scanners.repository import RepositoryScanError
 from cryptohawk.services.repository_runtime import build_repository_scanner
 from cryptohawk.storage.repositories import RepositoryAssetRepository
