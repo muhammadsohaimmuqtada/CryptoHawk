@@ -15,6 +15,8 @@ from cryptohawk.api.auth import (
     inventory,
     require_workspace_role,
 )
+from cryptohawk.api.credentials import initialize_connector_credentials
+from cryptohawk.api.credentials import router as credential_router
 from cryptohawk.api.middleware import SecurityAuditMiddleware, audit_repo
 from cryptohawk.api.schemas import (
     ApiKeyCreateRequest,
@@ -90,6 +92,7 @@ async def lifespan(_: FastAPI):
     scan_queue.create_schema()
     auth_repo.create_schema()
     audit_repo.create_schema()
+    initialize_connector_credentials()
     yield
 
 
@@ -99,6 +102,7 @@ app = FastAPI(
     description="Cryptographic exposure management and post-quantum readiness API",
     lifespan=lifespan,
 )
+app.include_router(credential_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
