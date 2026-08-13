@@ -147,12 +147,8 @@ def test_history_baseline_then_detects_introduced_resolved_and_risk_change(
         workspace_id=workspace.id,
         asset_id=asset.id,
     )
-    active_algorithms = {
-        state.fingerprint
-        for state in states
-        if state.active
-    }
-    assert len(active_algorithms) == 2
+    active_fingerprints = {state.fingerprint for state in states if state.active}
+    assert len(active_fingerprints) == 2
     assert sum(not state.active for state in states) == 1
 
     history = continuous.list_scan_history(
@@ -164,7 +160,7 @@ def test_history_baseline_then_detects_introduced_resolved_and_risk_change(
 
 
 def test_scheduler_occurrence_is_idempotent_and_skips_missed_backlog(tmp_path: Path) -> None:
-    inventory, quota, queue, continuous, workspace, asset = _stack(tmp_path)
+    inventory, _, queue, continuous, workspace, asset = _stack(tmp_path)
     now = datetime(2026, 8, 13, 5, 0, tzinfo=UTC)
     schedule = continuous.create_schedule(
         workspace_id=workspace.id,
@@ -207,5 +203,3 @@ def test_scheduler_occurrence_is_idempotent_and_skips_missed_backlog(tmp_path: P
     assert updated is not None
     assert updated.last_run_at == schedule.next_run_at
     assert updated.next_run_at > now
-
-    quota.reconcile_scan_slots(workspace_id=workspace.id)
