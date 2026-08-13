@@ -132,7 +132,8 @@ def _json_safe(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             name = str(key)
-            if any(token in name.lower() for token in ("secret", "token", "password", "credential")):
+            sensitive = ("secret", "token", "password", "credential")
+            if any(token in name.lower() for token in sensitive):
                 result[name] = "<redacted>"
             else:
                 result[name] = _json_safe(item)
