@@ -16,10 +16,13 @@ from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.executor import AssetScanExecutor
+from cryptohawk.services.scheduler import ScanScheduler, SchedulerConfig
 from cryptohawk.services.worker import ScanWorker, WorkerConfig
+from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.queue import ScanQueueRepository
+from cryptohawk.storage.quotas import QuotaRepository
 
 
 def _print(findings) -> None:
@@ -64,6 +67,11 @@ def main() -> None:
     worker.add_argument("--scan-timeout", type=float, default=5.0)
     worker.add_argument("--once", action="store_true")
 
+    scheduler = sub.add_parser("scheduler", help="Enqueue due continuous scan schedules")
+    scheduler.add_argument("--poll-interval", type=float, default=5.0)
+    scheduler.add_argument("--batch-size", type=int, default=100)
+    scheduler.add_argument("--once", action="store_true")
+
     migrate = sub.add_parser("migrate", help="Manage the CryptoHawk database schema")
     migrate.add_argument("action", choices=("upgrade", "downgrade", "current"))
     migrate.add_argument("revision", nargs="?")
@@ -104,34 +112,55 @@ def main() -> None:
         import uvicorn
 
         uvicorn.run(app, host=args.host, port=args.port)
-    elif args.command == "worker":
+    elif args.command in {"worker", "scheduler"}:
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
         inventory = InventoryRepository(settings.database_url)
-        queue = ScanQueueRepository(inventory)
+        quota = QuotaRepository(inventory)
+        queue = ScanQueueRepository(inventory, quota)
+        continuous = ContinuousRepository(inventory)
         if settings.auto_create_schema:
+            quota.create_schema()
             queue.create_schema()
+            continuous.create_schema()
         executor = AssetScanExecutor(
             risk_engine=engine,
             source_scanner=SourceScanner(),
             tls_scanner=TLSScanner(allow_private_targets=settings.allow_private_targets),
         )
-        runner = ScanWorker(
-            inventory,
-            repo,
-            queue,
-            executor=executor,
-            config=WorkerConfig(
-                worker_id=args.worker_id,
-                lease_seconds=args.lease_seconds,
-                poll_interval=args.poll_interval,
-                retry_backoff_seconds=args.retry_backoff,
-                scan_timeout=args.scan_timeout,
-            ),
-        )
-        if args.once:
-            runner.run_once()
+        if args.command == "worker":
+            runner = ScanWorker(
+                inventory,
+                repo,
+                queue,
+                executor=executor,
+                config=WorkerConfig(
+                    worker_id=args.worker_id,
+                    lease_seconds=args.lease_seconds,
+                    poll_interval=args.poll_interval,
+                    retry_backoff_seconds=args.retry_backoff,
+                    scan_timeout=args.scan_timeout,
+                ),
+                history=continuous,
+            )
+            if args.once:
+                runner.run_once()
+            else:
+                runner.run_forever()
         else:
-            runner.run_forever()
+            runner = ScanScheduler(
+                inventory,
+                queue,
+                continuous,
+                executor=executor,
+                config=SchedulerConfig(
+                    poll_interval=args.poll_interval,
+                    batch_size=args.batch_size,
+                ),
+            )
+            if args.once:
+                runner.run_once()
+            else:
+                runner.run_forever()
