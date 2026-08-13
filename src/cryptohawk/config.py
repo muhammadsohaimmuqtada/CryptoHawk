@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     bootstrap_attempts_per_hour: int = 5
     scan_submissions_per_minute: int = 30
     workspace_scan_concurrency: int = 4
+    connector_encryption_keys: str = ""
+    connector_encryption_active_version: int = 1
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
 

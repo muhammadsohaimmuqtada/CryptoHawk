@@ -8,8 +8,10 @@ from sqlalchemy import engine_from_config, pool
 
 from cryptohawk.storage import audit as audit_storage  # noqa: F401
 from cryptohawk.storage import auth as auth_storage  # noqa: F401
+from cryptohawk.storage import credentials as credential_storage  # noqa: F401
 from cryptohawk.storage import inventory as inventory_storage  # noqa: F401
 from cryptohawk.storage import queue as queue_storage  # noqa: F401
+from cryptohawk.storage import quotas as quota_storage  # noqa: F401
 from cryptohawk.storage.database import Base
 
 config = context.config

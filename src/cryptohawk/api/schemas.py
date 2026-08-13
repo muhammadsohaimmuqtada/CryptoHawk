@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from cryptohawk.domain.auth import User, WorkspaceMembership, WorkspaceRole
+from cryptohawk.domain.credentials import ConnectorCredentialKind
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanJob
 from cryptohawk.domain.models import Finding, ScanContext
 
@@ -71,6 +72,17 @@ class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     role: WorkspaceRole = WorkspaceRole.ANALYST
     expires_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class ConnectorCredentialCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: ConnectorCredentialKind
+    secret: dict[str, str] = Field(min_length=1, max_length=16)
+
+
+class ConnectorCredentialReplaceRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    secret: dict[str, str] = Field(min_length=1, max_length=16)
 
 
 class AssetCreateRequest(BaseModel):
