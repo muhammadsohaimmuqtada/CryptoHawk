@@ -15,6 +15,7 @@ def utcnow() -> datetime:
 
 class ManagedAssetKind(StrEnum):
     SOURCE = "source"
+    REPOSITORY = "repository"
     TLS_ENDPOINT = "tls-endpoint"
     HOST = "host"
     CONTAINER = "container"
@@ -24,6 +25,7 @@ class ManagedAssetKind(StrEnum):
 
 class ScanKind(StrEnum):
     SOURCE = "source"
+    REPOSITORY = "repository"
     TLS = "tls"
 
 

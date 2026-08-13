@@ -95,6 +95,15 @@ class AssetCreateRequest(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
+class RepositoryAssetCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    repository_url: str = Field(min_length=10, max_length=1000)
+    ref: str = Field(default="HEAD", min_length=1, max_length=200)
+    credential_id: str | None = Field(default=None, min_length=1, max_length=64)
+    context: ScanContext = Field(default_factory=ScanContext)
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
 class ManagedScanRequest(BaseModel):
     source: str | None = Field(default=None, max_length=1_000_000)
     filename: str | None = Field(default=None, max_length=1000)

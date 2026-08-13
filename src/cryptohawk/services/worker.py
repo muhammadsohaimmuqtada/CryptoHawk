@@ -88,7 +88,11 @@ class ScanWorker:
 
             if self._heartbeat_or_cancel(job.id):
                 return True
-            results = self.executor.execute(asset, timeout=self.config.scan_timeout)
+            results = self.executor.execute(
+                asset,
+                timeout=self.config.scan_timeout,
+                scan_job_id=job.id,
+            )
             if self.history is not None:
                 results = self.history.prepare_findings(job.id, results)
 
