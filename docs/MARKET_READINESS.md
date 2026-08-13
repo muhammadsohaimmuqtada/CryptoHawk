@@ -14,7 +14,7 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Outbound target policy for public SaaS operation
 - [x] Workspaces, managed assets, tenant-scoped findings, and scan-job state
 - [x] Durable worker queue with leases, retries, cancellation, and crash recovery
-- [ ] Scheduled scans and drift detection
+- [x] Scheduled scans and drift detection
 - [ ] Repository-native collector with commit identity and incremental scanning
 - [ ] Certificate-estate and SSH collectors
 - [ ] Container/image collector
@@ -33,12 +33,14 @@ Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is 
 
 ### P0 — reliability and evidence
 
-- [ ] Idempotent collector runs and deduplicated observations
-- [ ] Evidence history and scan provenance retained across rescans
+- [x] Idempotent collector runs and deduplicated observations
+- [x] Evidence history and scan provenance retained across rescans
 - [ ] Structured application logs, metrics, traces, and health/readiness probes
 - [ ] PostgreSQL backup/restore procedure tested
 - [ ] Load and soak tests for realistic asset volumes
 - [ ] Failure injection for worker/network/database interruptions
+
+Continuous scanning uses deterministic schedule occurrence IDs and per-scan observation IDs so scheduler crashes and worker retries do not create duplicate work or evidence. Successful scans retain scanner/policy provenance, observation occurrences, first/last-seen state, evidence hashes, and drift events.
 
 ### P0 — operator experience
 

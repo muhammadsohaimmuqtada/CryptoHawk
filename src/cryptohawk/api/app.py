@@ -15,6 +15,8 @@ from cryptohawk.api.auth import (
     inventory,
     require_workspace_role,
 )
+from cryptohawk.api.continuous import continuous_repo
+from cryptohawk.api.continuous import router as continuous_router
 from cryptohawk.api.credentials import initialize_connector_credentials
 from cryptohawk.api.credentials import router as credential_router
 from cryptohawk.api.middleware import SecurityAuditMiddleware, audit_repo
@@ -68,6 +70,7 @@ scan_jobs = ScanJobService(
     source_scanner=source_scanner,
     tls_scanner=tls_scanner,
     quota=quota_repo,
+    history=continuous_repo,
 )
 
 ViewerPrincipal = Annotated[
@@ -92,6 +95,7 @@ async def lifespan(_: FastAPI):
     scan_queue.create_schema()
     auth_repo.create_schema()
     audit_repo.create_schema()
+    continuous_repo.create_schema()
     initialize_connector_credentials()
     yield
 
@@ -102,6 +106,7 @@ app = FastAPI(
     description="Cryptographic exposure management and post-quantum readiness API",
     lifespan=lifespan,
 )
+app.include_router(continuous_router)
 app.include_router(credential_router)
 app.add_middleware(
     CORSMiddleware,

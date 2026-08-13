@@ -52,6 +52,23 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  scheduler:
+    build: .
+    command:
+      - cryptohawk
+      - scheduler
+      - --poll-interval
+      - "5"
+      - --batch-size
+      - "100"
+    environment:
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   web:
     build: ./frontend
     depends_on:

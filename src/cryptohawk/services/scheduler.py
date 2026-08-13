@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from cryptohawk.domain.inventory import ManagedAssetKind
+from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
+from cryptohawk.storage.continuous import ContinuousRepository
+from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.queue import ScanQueueRepository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerConfig:
+    poll_interval: float = 5.0
+    batch_size: int = 100
+
+    def __post_init__(self) -> None:
+        if not 0.5 <= self.poll_interval <= 300:
+            raise ValueError("poll_interval must be between 0.5 and 300 seconds")
+        if not 1 <= self.batch_size <= 1000:
+            raise ValueError("batch_size must be between 1 and 1000")
+
+
+class ScanScheduler:
+    def __init__(
+        self,
+        inventory: InventoryRepository,
+        queue: ScanQueueRepository,
+        continuous: ContinuousRepository,
+        *,
+        executor: AssetScanExecutor,
+        config: SchedulerConfig | None = None,
+    ) -> None:
+        self.inventory = inventory
+        self.queue = queue
+        self.continuous = continuous
+        self.executor = executor
+        self.config = config or SchedulerConfig()
+
+    def run_once(self, *, now: datetime | None = None) -> int:
+        current = now or datetime.now(UTC)
+        schedules = self.continuous.list_due_schedules(
+            now=current,
+            limit=self.config.batch_size,
+        )
+        enqueued = 0
+        for schedule in schedules:
+            asset = self.inventory.get_asset(
+                workspace_id=schedule.workspace_id,
+                asset_id=schedule.asset_id,
+            )
+            if asset is None:
+                continue
+            if not asset.enabled:
+                self.continuous.set_schedule_enabled(
+                    workspace_id=schedule.workspace_id,
+                    schedule_id=schedule.id,
+                    enabled=False,
+                    now=current,
+                )
+                continue
+            if asset.kind == ManagedAssetKind.SOURCE:
+                self.continuous.set_schedule_enabled(
+                    workspace_id=schedule.workspace_id,
+                    schedule_id=schedule.id,
+                    enabled=False,
+                    now=current,
+                )
+                logger.warning(
+                    "paused schedule %s because source assets require a repository collector",
+                    schedule.id,
+                )
+                continue
+
+            try:
+                kind = self.executor.scan_kind(asset)
+            except AssetScanError:
+                self.continuous.set_schedule_enabled(
+                    workspace_id=schedule.workspace_id,
+                    schedule_id=schedule.id,
+                    enabled=False,
+                    now=current,
+                )
+                logger.exception("paused unsupported scan schedule %s", schedule.id)
+                continue
+
+            scheduled_for = schedule.next_run_at
+            job_id = self.continuous.scheduled_job_id(schedule.id, scheduled_for)
+            job = self.queue.enqueue(
+                workspace_id=schedule.workspace_id,
+                asset_id=schedule.asset_id,
+                kind=kind,
+                max_attempts=schedule.max_attempts,
+                now=current,
+                job_id=job_id,
+            )
+            self.continuous.record_scheduled_execution(
+                schedule=schedule,
+                job_id=job.id,
+                scheduled_for=scheduled_for,
+                now=current,
+            )
+            if self.continuous.advance_schedule(
+                schedule=schedule,
+                scheduled_for=scheduled_for,
+                now=current,
+            ):
+                enqueued += 1
+        return enqueued
+
+    def run_forever(self) -> None:
+        logger.info("CryptoHawk scheduler started")
+        while True:
+            processed = self.run_once()
+            if processed == 0:
+                time.sleep(self.config.poll_interval)

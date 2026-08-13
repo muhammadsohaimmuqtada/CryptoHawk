@@ -13,6 +13,7 @@ from cryptohawk.services.executor import (
     SourceScannerProtocol,
     TLSScannerProtocol,
 )
+from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.quotas import QuotaRepository
@@ -29,10 +30,12 @@ class ScanJobService:
         source_scanner: SourceScannerProtocol | None = None,
         tls_scanner: TLSScannerProtocol | None = None,
         quota: QuotaRepository | None = None,
+        history: ContinuousRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.findings = findings
         self.quota = quota
+        self.history = history or ContinuousRepository(inventory)
         self.executor = executor or AssetScanExecutor(
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
@@ -78,11 +81,18 @@ class ScanJobService:
                     filename=filename,
                     timeout=timeout,
                 )
+                results = self.history.prepare_findings(job.id, results)
                 self.findings.upsert_many(
                     results,
                     workspace_id=workspace_id,
                     managed_asset_id=asset.id,
                     scan_job_id=job.id,
+                )
+                self.history.record_successful_scan(
+                    workspace_id=workspace_id,
+                    asset_id=asset.id,
+                    scan_job_id=job.id,
+                    findings=results,
                 )
                 job = self.inventory.transition_scan_job(
                     workspace_id=workspace_id,

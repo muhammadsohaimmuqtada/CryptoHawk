@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cryptohawk.domain.inventory import ScanJob, ScanKind, ScanStatus
@@ -56,6 +57,7 @@ class ScanQueueRepository:
         kind: ScanKind,
         max_attempts: int = 3,
         now: datetime | None = None,
+        job_id: str | None = None,
     ) -> ScanJob:
         if not 1 <= max_attempts <= 20:
             raise ValueError("max_attempts must be between 1 and 20")
@@ -64,8 +66,14 @@ class ScanQueueRepository:
             workspace_id=workspace_id,
             asset_id=asset_id,
             kind=kind,
+            job_id=job_id,
         )
         with self.SessionLocal() as session:
+            existing = session.get(ScanQueueRecord, job.id)
+            if existing is not None:
+                if existing.max_attempts != max_attempts:
+                    raise ValueError("queued scan job already exists with different retry policy")
+                return job
             session.add(
                 ScanQueueRecord(
                     job_id=job.id,
@@ -75,7 +83,17 @@ class ScanQueueRepository:
                     cancel_requested=False,
                 )
             )
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                existing = session.get(ScanQueueRecord, job.id)
+                if existing is None:
+                    raise
+                if existing.max_attempts != max_attempts:
+                    raise ValueError(
+                        "queued scan job already exists with different retry policy"
+                    ) from exc
         return job
 
     def claim_next(
@@ -112,7 +130,7 @@ class ScanQueueRepository:
                 .limit(20)
             ).all()
 
-        for job_id, workspace_id in candidates:
+        for candidate_job_id, workspace_id in candidates:
             slot_acquired = False
             if self.quota is not None:
                 slot_acquired = self.quota.acquire_scan_slot(
@@ -128,7 +146,7 @@ class ScanQueueRepository:
                     queue_update = session.execute(
                         update(ScanQueueRecord)
                         .where(
-                            ScanQueueRecord.job_id == job_id,
+                            ScanQueueRecord.job_id == candidate_job_id,
                             ScanQueueRecord.lease_owner.is_(None),
                             ScanQueueRecord.cancel_requested.is_(False),
                             ScanQueueRecord.next_attempt_at <= now,
@@ -150,7 +168,7 @@ class ScanQueueRepository:
                     job_update = session.execute(
                         update(ScanJobRecord)
                         .where(
-                            ScanJobRecord.id == job_id,
+                            ScanJobRecord.id == candidate_job_id,
                             ScanJobRecord.status == ScanStatus.QUEUED.value,
                         )
                         .values(status=ScanStatus.RUNNING.value, started_at=now)
@@ -165,7 +183,7 @@ class ScanQueueRepository:
                 if slot_acquired:
                     self._release_capacity(workspace_id, now)
                 raise
-            return self._lease_from_job_id(job_id, worker_id)
+            return self._lease_from_job_id(candidate_job_id, worker_id)
         return None
 
     def heartbeat(

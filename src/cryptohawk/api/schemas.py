@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from cryptohawk.domain.auth import User, WorkspaceMembership, WorkspaceRole
@@ -101,6 +103,12 @@ class ManagedScanRequest(BaseModel):
 
 class QueuedScanRequest(BaseModel):
     max_attempts: int = Field(default=3, ge=1, le=20)
+
+
+class ScanScheduleCreateRequest(BaseModel):
+    interval_minutes: int = Field(default=60, ge=1, le=43_200)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    start_at: datetime | None = None
 
 
 class ScanExecutionResponse(BaseModel):
