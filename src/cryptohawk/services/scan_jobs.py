@@ -9,6 +9,7 @@ from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.executor import (
     AssetScanError,
     AssetScanExecutor,
+    RepositoryScannerProtocol,
     RiskEngineProtocol,
     SourceScannerProtocol,
     TLSScannerProtocol,
@@ -28,6 +29,7 @@ class ScanJobService:
         executor: AssetScanExecutor | None = None,
         risk_engine: RiskEngineProtocol | None = None,
         source_scanner: SourceScannerProtocol | None = None,
+        repository_scanner: RepositoryScannerProtocol | None = None,
         tls_scanner: TLSScannerProtocol | None = None,
         quota: QuotaRepository | None = None,
         history: ContinuousRepository | None = None,
@@ -39,6 +41,7 @@ class ScanJobService:
         self.executor = executor or AssetScanExecutor(
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
+            repository_scanner=repository_scanner,
             tls_scanner=tls_scanner or TLSScanner(),
         )
 
@@ -80,6 +83,7 @@ class ScanJobService:
                     source=source,
                     filename=filename,
                     timeout=timeout,
+                    scan_job_id=job.id,
                 )
                 results = self.history.prepare_findings(job.id, results)
                 self.findings.upsert_many(
