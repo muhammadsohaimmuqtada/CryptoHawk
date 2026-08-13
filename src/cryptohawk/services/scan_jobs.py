@@ -38,6 +38,10 @@ class ScanJobService:
         self.findings = findings
         self.quota = quota
         self.history = history or ContinuousRepository(inventory)
+        if repository_scanner is None:
+            from cryptohawk.services.repository_runtime import build_repository_scanner
+
+            repository_scanner = build_repository_scanner(inventory, self.history)
         self.executor = executor or AssetScanExecutor(
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
