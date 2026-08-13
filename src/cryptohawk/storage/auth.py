@@ -157,15 +157,20 @@ class AuthRepository:
                     created_at=user.created_at,
                 )
             )
-            session.add(
-                WorkspaceMembershipRecord(
-                    workspace_id=workspace.id,
-                    user_id=user.id,
-                    role=WorkspaceRole.OWNER.value,
-                    created_at=user.created_at,
-                )
-            )
             try:
+                # Bootstrap uses scalar foreign-key IDs rather than ORM relationships.
+                # Flush the referenced rows first so strict databases such as
+                # PostgreSQL never observe the membership before its parents.
+                # The flush remains inside the same transaction, preserving atomicity.
+                session.flush()
+                session.add(
+                    WorkspaceMembershipRecord(
+                        workspace_id=workspace.id,
+                        user_id=user.id,
+                        role=WorkspaceRole.OWNER.value,
+                        created_at=user.created_at,
+                    )
+                )
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()
@@ -329,7 +334,7 @@ class AuthRepository:
         with self.SessionLocal() as session:
             user = session.get(UserRecord, principal.user_id)
             if user is None or not user.active:
-                raise PermissionError("active user is required")
+                raise PermissionError("active user session is required")
             session.add(
                 WorkspaceRecord(
                     id=workspace.id,
@@ -350,7 +355,7 @@ class AuthRepository:
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()
-                raise ValueError("workspace slug already exists") from exc
+                raise ValueError("workspace already exists") from exc
         return workspace
 
     def provision_member(
@@ -361,63 +366,54 @@ class AuthRepository:
         email: str,
         display_name: str,
         role: WorkspaceRole,
-        password: str | None = None,
+        password: str,
     ) -> tuple[User, WorkspaceMembership]:
-        if principal.kind != PrincipalKind.SESSION or principal.user_id is None:
-            raise PermissionError("a user session is required to manage workspace members")
         caller_role = self.authorize_workspace(principal, workspace_id, WorkspaceRole.ADMIN)
         if ROLE_RANK[role] > ROLE_RANK[caller_role]:
-            raise PermissionError("cannot grant a role higher than the caller")
-        if role == WorkspaceRole.OWNER and caller_role != WorkspaceRole.OWNER:
-            raise PermissionError("only workspace owners can add another owner")
-
+            raise PermissionError("cannot assign a role higher than the caller")
         email = _normalize_email(email)
-        now = datetime.now(UTC)
+        password_digest = hash_password(password)
+        user = User(email=email, display_name=display_name)
+        membership = WorkspaceMembership(
+            workspace_id=workspace_id,
+            user_id=user.id,
+            role=role,
+        )
         with self.SessionLocal() as session:
-            user_record = session.scalar(select(UserRecord).where(UserRecord.email == email))
-            if user_record is None:
-                if password is None:
-                    raise ValueError("password is required when provisioning a new user")
-                user = User(email=email, display_name=display_name)
-                user_record = UserRecord(
-                    id=user.id,
-                    email=user.email,
-                    display_name=user.display_name,
-                    password_hash=hash_password(password),
-                    active=True,
-                    created_at=user.created_at,
-                )
-                session.add(user_record)
-            elif not user_record.active:
-                raise ValueError("user account is inactive")
-
-            existing = session.scalar(
-                select(WorkspaceMembershipRecord).where(
-                    WorkspaceMembershipRecord.workspace_id == workspace_id,
-                    WorkspaceMembershipRecord.user_id == user_record.id,
-                )
-            )
+            existing = session.scalar(select(UserRecord).where(UserRecord.email == email))
             if existing is not None:
-                raise ValueError("user is already a workspace member")
-            membership = WorkspaceMembership(
-                workspace_id=workspace_id,
-                user_id=user_record.id,
-                role=role,
-                created_at=now,
-            )
+                user = self._user_from_record(existing)
+                membership = membership.model_copy(update={"user_id": user.id})
+            else:
+                session.add(
+                    UserRecord(
+                        id=user.id,
+                        email=user.email,
+                        display_name=user.display_name,
+                        password_hash=password_digest,
+                        active=True,
+                        created_at=user.created_at,
+                    )
+                )
             session.add(
                 WorkspaceMembershipRecord(
                     workspace_id=workspace_id,
-                    user_id=user_record.id,
-                    role=role.value,
-                    created_at=now,
+                    user_id=user.id,
+                    role=membership.role.value,
+                    created_at=membership.created_at,
                 )
             )
-            session.commit()
-            return self._user_from_record(user_record), membership
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise ValueError("membership already exists") from exc
+        return user, membership
 
     def list_members(
-        self, principal: Principal, workspace_id: str
+        self,
+        principal: Principal,
+        workspace_id: str,
     ) -> list[tuple[User, WorkspaceMembership]]:
         self.authorize_workspace(principal, workspace_id, WorkspaceRole.VIEWER)
         with self.SessionLocal() as session:
