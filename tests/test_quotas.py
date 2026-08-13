@@ -146,7 +146,9 @@ def test_queue_capacity_does_not_burn_retry_attempts(tmp_path: Path) -> None:
     assert second.attempt == 1
 
 
-def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> None:
+def test_saturated_workspace_deep_backlog_does_not_starve_other_tenant(
+    tmp_path: Path,
+) -> None:
     _, inventory, _quota, queue, alpha, alpha_asset = _inventory(tmp_path)
     beta = inventory.create_workspace(name="Beta")
     beta_asset = inventory.create_asset(
@@ -157,16 +159,14 @@ def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> Non
         context=ScanContext(internet_exposed=True),
     )
 
-    alpha_first = queue.enqueue(
-        workspace_id=alpha.id,
-        asset_id=alpha_asset.id,
-        kind=ScanKind.TLS,
-    )
-    queue.enqueue(
-        workspace_id=alpha.id,
-        asset_id=alpha_asset.id,
-        kind=ScanKind.TLS,
-    )
+    alpha_jobs = [
+        queue.enqueue(
+            workspace_id=alpha.id,
+            asset_id=alpha_asset.id,
+            kind=ScanKind.TLS,
+        )
+        for _ in range(30)
+    ]
     beta_job = queue.enqueue(
         workspace_id=beta.id,
         asset_id=beta_asset.id,
@@ -178,7 +178,7 @@ def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> Non
         lease_seconds=30,
         concurrency_limit=1,
     )
-    assert first is not None and first.job.id == alpha_first.id
+    assert first is not None and first.job.id == alpha_jobs[0].id
 
     cross_tenant = queue.claim_next(
         worker_id="worker-beta",
@@ -189,6 +189,9 @@ def test_saturated_workspace_does_not_starve_other_tenant(tmp_path: Path) -> Non
     assert cross_tenant.job.id == beta_job.id
     assert cross_tenant.job.workspace_id == beta.id
 
+    for untouched in alpha_jobs[1:]:
+        state = queue.get_state(untouched.id)
+        assert state is not None and state.attempts == 0
 
 
 def test_synchronous_scan_respects_shared_capacity(tmp_path: Path, monkeypatch) -> None:
