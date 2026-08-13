@@ -94,7 +94,7 @@ export type IssuedToken = {
 }
 
 export type AuthMode = 'checking' | 'bootstrap' | 'login' | 'ready'
-export type OperatorView = 'command' | 'inventory'
+export type OperatorView = 'command' | 'inventory' | 'history'
 
 export type ScannableAssetKind =
   | 'tls-endpoint'
