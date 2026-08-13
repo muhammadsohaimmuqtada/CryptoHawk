@@ -16,26 +16,36 @@ if [[ ! -f "$backup_path" || ! -f "$checksum_path" ]]; then
   exit 66
 fi
 
-(
-  cd -- "$(dirname -- "$backup_path")"
-  sha256sum --check --status "$(basename -- "$checksum_path")"
-) || {
+# Bind integrity verification to the exact archive argument. Do not delegate
+# filename selection to sha256sum --check because a modified sidecar could
+# otherwise name a different file while the requested archive remained unchecked.
+if [[ $(wc -l <"$checksum_path") -ne 1 ]]; then
+  echo "backup checksum sidecar must contain exactly one entry" >&2
+  exit 65
+fi
+expected_checksum=$(awk '{print $1}' "$checksum_path")
+if [[ ! "$expected_checksum" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  echo "backup checksum sidecar is malformed" >&2
+  exit 65
+fi
+actual_checksum=$(sha256sum -- "$backup_path" | awk '{print $1}')
+if [[ "${actual_checksum,,}" != "${expected_checksum,,}" ]]; then
   echo "backup checksum verification failed" >&2
   exit 65
-}
+fi
 
 pg_restore --list "$backup_path" >/dev/null
 
-user_table_count=$(
+user_relation_count=$(
   psql "$CRYPTOHAWK_POSTGRES_URL" \
     --no-psqlrc \
     --tuples-only \
     --no-align \
     --set=ON_ERROR_STOP=1 \
-    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema');"
+    --command="SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_toast' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f');"
 )
 
-if [[ "$user_table_count" != "0" ]]; then
+if [[ "$user_relation_count" != "0" ]]; then
   echo "restore target is not empty; refusing destructive restore" >&2
   exit 73
 fi
