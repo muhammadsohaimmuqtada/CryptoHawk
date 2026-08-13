@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class AssetType(StrEnum):
     SOURCE = "source"
+    REPOSITORY = "repository"
     TLS_ENDPOINT = "tls-endpoint"
     CERTIFICATE = "certificate"
     CONTAINER = "container"
