@@ -5,17 +5,18 @@ import io
 import json
 import re
 import tarfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 import zstandard as zstd
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from cryptohawk.domain.inventory import ManagedAsset
-from cryptohawk.domain.models import AssetType, CryptoObservation, Evidence
+from cryptohawk.domain.models import AssetType, CryptoObservation
 from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import IGNORED_DIRS, SUPPORTED_EXTENSIONS, SourceScanner
 
@@ -225,7 +226,9 @@ class ContainerImageScanner:
         try:
             size = archive.stat().st_size
         except OSError as exc:
-            raise ContainerImageScanError("container image archive metadata is unavailable") from exc
+            raise ContainerImageScanError(
+                "container image archive metadata is unavailable"
+            ) from exc
         if size <= 0:
             raise ContainerImageScanError("container image archive is empty")
         if size > self.max_archive_bytes:
@@ -484,7 +487,9 @@ class ContainerImageScanner:
                 tar = tarfile.open(fileobj=raw, mode="r:*")
             yield tar
         except (tarfile.TarError, zstd.ZstdError, OSError) as exc:
-            raise ContainerImageScanError("container image layer is not a valid tar changeset") from exc
+            raise ContainerImageScanError(
+                "container image layer is not a valid tar changeset"
+            ) from exc
         finally:
             if tar is not None:
                 tar.close()
@@ -623,7 +628,11 @@ class ContainerImageScanner:
         if any(part in IGNORED_DIRS for part in path.parts):
             return False
         suffix = path.suffix.lower()
-        return suffix in SUPPORTED_EXTENSIONS or suffix in _CERTIFICATE_EXTENSIONS or suffix == ".cnf"
+        return (
+            suffix in SUPPORTED_EXTENSIONS
+            or suffix in _CERTIFICATE_EXTENSIONS
+            or suffix == ".cnf"
+        )
 
     def _validate_limits(self) -> None:
         values = {
