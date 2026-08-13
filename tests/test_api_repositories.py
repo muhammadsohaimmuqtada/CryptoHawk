@@ -206,7 +206,7 @@ def test_repository_registration_is_workspace_scoped(tmp_path: Path, monkeypatch
     assert created.status_code == 201
     asset_id = created.json()["asset"]["id"]
 
-    principal = auth.authenticate_bearer(owner_token)
+    principal = auth.authenticate(owner_token)
     other = auth.create_workspace(principal=principal, name="Other", slug="other")
 
     hidden = client.get(
