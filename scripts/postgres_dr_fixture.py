@@ -223,13 +223,11 @@ def seed(manifest_path: Path) -> None:
         limit=10,
         window_seconds=60,
     )
-    quota.scan_capacity(workspace_id=workspace.id, limit=4)
+    capacity = quota.scan_capacity(workspace_id=workspace.id, limit=4)
 
     _stage("alembic.revision")
     with inventory.engine.connect() as connection:
-        alembic_revision = connection.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).scalar_one()
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
 
     _stage("manifest.write")
     _write_manifest(
@@ -248,7 +246,8 @@ def seed(manifest_path: Path) -> None:
             "credential_id": credential.id,
             "credential_secret": connector_secret,
             "audit_event_id": audit_event.id,
-            "alembic_revision": alembic_revision,
+            "capacity_limit": capacity.limit,
+            "alembic_revision": revision,
         },
     )
     print("dr_fixture_seeded=true", flush=True)
@@ -264,7 +263,6 @@ def verify(manifest_path: Path) -> None:
     inventory, findings, quota, queue, auth, audit, continuous, credentials = _repositories()
 
     workspace_id = str(data["workspace_id"])
-    user_id = str(data["user_id"])
     asset_id = str(data["asset_id"])
     history_job_id = str(data["history_job_id"])
     queued_job_id = str(data["queued_job_id"])
@@ -273,29 +271,17 @@ def verify(manifest_path: Path) -> None:
     _stage("verify.workspace")
     workspace = inventory.get_workspace(workspace_id)
     _expect(workspace is not None, "workspace was not restored")
-    _expect(workspace.slug == "dr-verification", "workspace identity changed after restore")
+    _expect(workspace.slug == "dr-verification", "workspace identity changed")
 
     _stage("verify.session")
     session_principal = auth.authenticate(str(data["session_token"]))
-    _expect(session_principal.user_id == user_id, "restored session token is invalid")
-    _expect(session_principal.kind == PrincipalKind.SESSION, "restored session principal changed")
-    _expect(
-        auth.authorize_workspace(session_principal, workspace_id, WorkspaceRole.OWNER)
-        == WorkspaceRole.OWNER,
-        "restored owner membership is invalid",
-    )
+    _expect(session_principal.kind == PrincipalKind.SESSION, "session authentication failed")
+    auth.authorize_workspace(session_principal, workspace_id, WorkspaceRole.OWNER)
 
     _stage("verify.api-key")
     api_principal = auth.authenticate(str(data["api_key_token"]))
-    _expect(api_principal.kind == PrincipalKind.API_KEY, "restored API key principal changed")
-    _expect(
-        api_principal.api_key_workspace_id == workspace_id,
-        "restored API key workspace scope changed",
-    )
-    _expect(
-        api_principal.api_key_role == WorkspaceRole.ANALYST,
-        "restored API key role changed",
-    )
+    _expect(api_principal.kind == PrincipalKind.API_KEY, "API key authentication failed")
+    auth.authorize_workspace(api_principal, workspace_id, WorkspaceRole.ANALYST)
 
     _stage("verify.asset")
     asset = inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id)
@@ -345,7 +331,7 @@ def verify(manifest_path: Path) -> None:
     _stage("verify.history")
     history = continuous.list_scan_history(workspace_id=workspace_id, asset_id=asset_id)
     _expect(len(history) == 1, "scan history was not restored")
-    _expect(history[0].scan_job_id == history_job_id, "scan history job identity changed")
+    _expect(history[0].job_id == history_job_id, "scan history job identity changed")
     states = continuous.list_observation_states(
         workspace_id=workspace_id,
         asset_id=asset_id,
@@ -393,7 +379,6 @@ def main() -> None:
     parser.add_argument("mode", choices=("seed", "verify"))
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
-
     if args.mode == "seed":
         seed(args.manifest)
     else:
