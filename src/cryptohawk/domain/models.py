@@ -13,6 +13,7 @@ class AssetType(StrEnum):
     REPOSITORY = "repository"
     TLS_ENDPOINT = "tls-endpoint"
     CERTIFICATE = "certificate"
+    SSH_ENDPOINT = "ssh-endpoint"
     CONTAINER = "container"
     HOST = "host"
 
