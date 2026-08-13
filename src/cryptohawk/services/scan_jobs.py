@@ -8,9 +8,11 @@ from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
+from cryptohawk.services.container_runtime import build_container_scanner
 from cryptohawk.services.executor import (
     AssetScanError,
     AssetScanExecutor,
+    ContainerScannerProtocol,
     EndpointScannerProtocol,
     RepositoryScannerProtocol,
     RiskEngineProtocol,
@@ -32,6 +34,7 @@ class ScanJobService:
         risk_engine: RiskEngineProtocol | None = None,
         source_scanner: SourceScannerProtocol | None = None,
         repository_scanner: RepositoryScannerProtocol | None = None,
+        container_scanner: ContainerScannerProtocol | None = None,
         tls_scanner: EndpointScannerProtocol | None = None,
         certificate_scanner: EndpointScannerProtocol | None = None,
         ssh_scanner: EndpointScannerProtocol | None = None,
@@ -50,6 +53,7 @@ class ScanJobService:
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
             repository_scanner=repository_scanner,
+            container_scanner=container_scanner or build_container_scanner(),
             tls_scanner=tls_scanner
             or TLSScanner(allow_private_targets=settings.allow_private_targets),
             certificate_scanner=certificate_scanner

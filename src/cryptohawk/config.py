@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     repository_max_files: int = 20_000
     repository_max_scan_bytes: int = 100_000_000
     repository_max_file_bytes: int = 2_000_000
+    container_archive_root: str = ""
+    container_platform_os: str = "linux"
+    container_platform_arch: str = "amd64"
+    container_max_archive_bytes: int = 2_000_000_000
+    container_max_layers: int = 128
+    container_max_layer_compressed_bytes: int = 256_000_000
+    container_max_layer_uncompressed_bytes: int = 1_000_000_000
+    container_max_entries: int = 250_000
+    container_max_file_bytes: int = 2_000_000
+    container_max_scan_bytes: int = 150_000_000
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
 

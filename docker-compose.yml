@@ -29,6 +29,9 @@ services:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
       CRYPTOHAWK_CORS_ORIGINS: http://localhost:3000
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
+      CRYPTOHAWK_CONTAINER_ARCHIVE_ROOT: /var/lib/cryptohawk/images
+    volumes:
+      - ${CRYPTOHAWK_CONTAINER_ARCHIVE_HOST_PATH:-./container-images}:/var/lib/cryptohawk/images:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -47,6 +50,9 @@ services:
     environment:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
+      CRYPTOHAWK_CONTAINER_ARCHIVE_ROOT: /var/lib/cryptohawk/images
+    volumes:
+      - ${CRYPTOHAWK_CONTAINER_ARCHIVE_HOST_PATH:-./container-images}:/var/lib/cryptohawk/images:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

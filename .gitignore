@@ -39,6 +39,7 @@ credentials/
 reports/
 cbom-output/
 scanner-data/
+container-images/
 logs/
 *.log
 

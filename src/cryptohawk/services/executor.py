@@ -6,6 +6,11 @@ from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanKind
 from cryptohawk.domain.models import CryptoObservation, Finding
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.certificates import CertificateScanner
+from cryptohawk.scanners.container_image import (
+    ContainerImageCollection,
+    ContainerImageScanError,
+    ContainerImageScanner,
+)
 from cryptohawk.scanners.repository import RepositoryCollection
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.ssh import SSHScanner
@@ -30,6 +35,10 @@ class RepositoryScannerProtocol(Protocol):
     def scan(self, asset: ManagedAsset, *, scan_job_id: str) -> RepositoryCollection: ...
 
 
+class ContainerScannerProtocol(Protocol):
+    def scan(self, asset: ManagedAsset) -> ContainerImageCollection: ...
+
+
 class EndpointScannerProtocol(Protocol):
     def scan(
         self, hostname: str, port: int, timeout: float = 5.0
@@ -47,6 +56,7 @@ class AssetScanExecutor:
         risk_engine: RiskEngineProtocol | None = None,
         source_scanner: SourceScannerProtocol | None = None,
         repository_scanner: RepositoryScannerProtocol | None = None,
+        container_scanner: ContainerScannerProtocol | None = None,
         tls_scanner: EndpointScannerProtocol | None = None,
         certificate_scanner: EndpointScannerProtocol | None = None,
         ssh_scanner: EndpointScannerProtocol | None = None,
@@ -54,6 +64,7 @@ class AssetScanExecutor:
         self.risk_engine = risk_engine or RiskEngine()
         self.source_scanner = source_scanner or SourceScanner()
         self.repository_scanner = repository_scanner
+        self.container_scanner = container_scanner or ContainerImageScanner()
         self.tls_scanner = tls_scanner or TLSScanner()
         self.certificate_scanner = certificate_scanner or CertificateScanner()
         self.ssh_scanner = ssh_scanner or SSHScanner()
@@ -88,6 +99,8 @@ class AssetScanExecutor:
             return ScanKind.SOURCE
         if asset.kind == ManagedAssetKind.REPOSITORY:
             return ScanKind.REPOSITORY
+        if asset.kind == ManagedAssetKind.CONTAINER:
+            return ScanKind.CONTAINER
         if asset.kind == ManagedAssetKind.TLS_ENDPOINT:
             return ScanKind.TLS
         if asset.kind == ManagedAssetKind.CERTIFICATE_ENDPOINT:
@@ -123,6 +136,12 @@ class AssetScanExecutor:
                 asset,
                 scan_job_id=scan_job_id,
             ).observations
+
+        if asset.kind == ManagedAssetKind.CONTAINER:
+            try:
+                return self.container_scanner.scan(asset).observations
+            except ContainerImageScanError as exc:
+                raise AssetScanError(str(exc)) from exc
 
         if asset.kind == ManagedAssetKind.TLS_ENDPOINT:
             hostname, port = self.parse_endpoint_locator(

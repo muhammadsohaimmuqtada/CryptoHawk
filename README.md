@@ -2,9 +2,9 @@
 
 **Cryptographic Exposure Management and Post-Quantum Cryptography Readiness Platform**
 
-CryptoHawk discovers cryptography across source repositories and live services, turns observations into an evidence-backed inventory, scores cryptographic and quantum exposure deterministically, recommends migration targets, tracks drift, and exports a CycloneDX 1.7 Cryptography Bill of Materials (CBOM).
+CryptoHawk discovers cryptography across source repositories, container images and live services, turns observations into an evidence-backed inventory, scores cryptographic and quantum exposure deterministically, recommends migration targets, tracks drift, and exports a CycloneDX 1.7 Cryptography Bill of Materials (CBOM).
 
-> Status: **pre-market engineering build** — authenticated multi-workspace inventory, encrypted connector credentials, durable workers, scheduled scans, drift history, repository-native incremental discovery, TLS/X.509 inspection, certificate-estate discovery, SSH host-key discovery, deterministic risk assessment, CBOM export, REST API, CLI, React command center, Docker deployment and CI are implemented. CryptoHawk is not yet declared production-ready; see `docs/MARKET_READINESS.md`.
+> Status: **pre-market engineering build** — authenticated multi-workspace inventory, encrypted connector credentials, durable workers, scheduled scans, drift history, repository-native incremental discovery, OCI/Docker image archive discovery, TLS/X.509 inspection, certificate-estate discovery, SSH host-key discovery, deterministic risk assessment, CBOM export, REST API, CLI, React command center, Docker deployment and CI are implemented. CryptoHawk is not yet declared production-ready; see `docs/MARKET_READINESS.md`.
 
 ## Why CryptoHawk exists
 
@@ -18,6 +18,8 @@ The core decision engine is deterministic. Findings carry source evidence, confi
 
 - Source-code cryptographic primitive discovery across common languages and configuration files
 - Repository-native Git discovery with commit identity, full-to-incremental rescans and provenance
+- OCI image-layout and Docker image archive discovery with verified OCI digests and effective-filesystem reconstruction
+- Container layer support for uncompressed, gzip and zstd changesets with explicit and opaque whiteout handling
 - Encrypted GitHub/GitLab connector credentials with workspace-scoped access controls
 - Live TLS endpoint inspection with negotiated protocol, cipher and X.509 evidence
 - Certificate-estate discovery for leaf public-key material, signature hashes, validity, subject/issuer, SANs and fingerprints
@@ -32,35 +34,35 @@ The core decision engine is deterministic. Findings carry source evidence, confi
 - Scheduled scans, evidence history and cryptographic drift detection
 - Risk-prioritized REST API and React command center
 - CycloneDX **1.7** CBOM export using `cryptographic-asset` components
-- CLI for source, TLS, certificate and SSH scanning, API serving, workers, scheduler and CBOM export
-- Docker Compose stack with PostgreSQL, API, worker, scheduler and web UI
+- CLI for source, image, TLS, certificate and SSH scanning, API serving, workers, scheduler and CBOM export
+- Docker Compose stack with PostgreSQL, API, worker, scheduler, read-only image ingress and web UI
 - CI for linting, backend tests, dependency audits and frontend production build
 
 ## Architecture
 
 ```text
-Source / Git repositories / TLS / X.509 / SSH
-                 │
-                 ▼
-          Discovery adapters
-                 │
-                 ▼
-        Normalized CryptoObservation
-                 │
-                 ├──── Evidence + confidence + provenance
-                 ▼
-        Deterministic Risk Engine
-                 │
-                 ├──── Quantum status
-                 ├──── Exposure score
-                 ├──── Migration target
-                 ▼
-          Persistent Inventory
-                 │
-                 ├──── History + drift
-                 ├──── REST API
-                 ├──── React Dashboard
-                 └──── CycloneDX 1.7 CBOM
+Source / Git repositories / OCI-Docker images / TLS / X.509 / SSH
+                          │
+                          ▼
+                   Discovery adapters
+                          │
+                          ▼
+                 Normalized CryptoObservation
+                          │
+                          ├──── Evidence + confidence + provenance
+                          ▼
+                 Deterministic Risk Engine
+                          │
+                          ├──── Quantum status
+                          ├──── Exposure score
+                          ├──── Migration target
+                          ▼
+                   Persistent Inventory
+                          │
+                          ├──── History + drift
+                          ├──── REST API
+                          ├──── React Dashboard
+                          └──── CycloneDX 1.7 CBOM
 ```
 
 ## Quick start
@@ -99,6 +101,9 @@ Open `http://localhost:3000`.
 # Scan a local source tree
 cryptohawk scan-source ./my-application
 
+# Scan an OCI layout tar or `docker save` archive
+cryptohawk scan-image ./payments-image.tar
+
 # Inspect negotiated TLS cryptography
 cryptohawk scan-tls example.com
 
@@ -112,7 +117,9 @@ cryptohawk scan-ssh bastion.example.com
 cryptohawk export-cbom --output cryptohawk-cbom.json
 ```
 
-Repository assets are registered through the authenticated workspace API and can be executed synchronously, queued to durable workers, or scheduled continuously.
+Repository and managed asset scans can be executed synchronously, queued to durable workers, or scheduled continuously. Managed container assets use a locator such as `image-archive:payments-image.tar`; workers resolve that relative path only inside `CRYPTOHAWK_CONTAINER_ARCHIVE_ROOT`. In Docker Compose the host-side ingress defaults to `./container-images` and is mounted read-only into the API and worker containers.
+
+For archives containing multiple Docker images, set the managed asset tag `image_ref` to the desired `RepoTag`. For OCI archives containing multiple tagged/platform manifests, use `oci_ref`; the default platform selector is `linux/amd64` and is configurable.
 
 ## API
 
@@ -128,22 +135,25 @@ CryptoHawk is designed around public standards rather than a proprietary invento
 - NIST FIPS 204 — ML-DSA
 - NIST FIPS 205 — SLH-DSA
 - CycloneDX 1.7 Cryptography Bill of Materials / cryptographic asset model
+- OCI Image Format for image manifests, content descriptors and filesystem layer changesets
 
 CryptoHawk-specific risk metadata is emitted as namespaced CycloneDX properties so the CBOM stays portable while retaining operational context.
 
 ## Roadmap
 
-The next major slices are container/image cryptography discovery, structured observability and readiness probes, PostgreSQL backup/restore validation, load/soak and failure-injection testing, stronger asset onboarding/operator workflows, migration ownership/status tracking, policy packs, exportable reports and enterprise SSO/OIDC.
+The next major slices are structured observability and readiness probes, PostgreSQL backup/restore validation, load/soak and failure-injection testing, stronger asset onboarding/operator workflows, migration ownership/status tracking, policy packs, exportable reports, native registry ingestion and enterprise SSO/OIDC.
 
-### Network scan safety
+### Collector safety
 
 Network collectors block non-global targets by default and connect to the exact validated DNS answer, avoiding a second resolution between policy evaluation and connection. For a self-hosted enterprise collector that must inspect RFC1918/internal assets, set `CRYPTOHAWK_ALLOW_PRIVATE_TARGETS=true` deliberately at the deployment boundary. Do not enable that option on a shared public SaaS worker.
 
 Certificate-estate collection intentionally inventories the presented certificate without performing trust validation so expired, self-issued or otherwise untrusted certificates can still be discovered. SSH collection performs transport negotiation only far enough to retrieve the server host key; it does not authenticate and does not execute remote commands.
 
+Container-image scanning never extracts layer contents to the worker filesystem. It verifies OCI sha256 blobs, applies image-layer deletion semantics before discovery, enforces archive/layer/file/entry/scan-byte limits, and removes source snippets from image-derived evidence to reduce accidental secret disclosure. Managed image paths are confined to a dedicated archive root.
+
 ## Security
 
-CryptoHawk is a defensive inventory and migration product. Do not scan systems you do not own or have authorization to assess. Secrets, private keys, runtime databases and generated scanner data are excluded by the repository `.gitignore`.
+CryptoHawk is a defensive inventory and migration product. Do not scan systems you do not own or have authorization to assess. Secrets, private keys, runtime databases, container image ingress and generated scanner data are excluded by the repository `.gitignore`.
 
 ## License
 

@@ -17,9 +17,11 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Scheduled scans and drift detection
 - [x] Repository-native collector with commit identity and incremental scanning
 - [x] Certificate-estate and SSH collectors
-- [ ] Container/image collector
+- [x] Container/image collector
 
 Repository scanning supports safe HTTPS Git acquisition, encrypted GitHub/GitLab credentials, full-to-incremental rescans, commit provenance, and drift/history reconciliation. Certificate-estate scanning inventories leaf X.509 key material and signature hashes even when trust validation would fail; SSH scanning negotiates transport only far enough to collect the server host key and does not authenticate or execute commands.
+
+Container-image discovery supports OCI image-layout and Docker image archives. It verifies OCI sha256 content descriptors, supports gzip/uncompressed/zstd layer changesets, applies explicit and opaque whiteouts before scanning the effective filesystem, never extracts image content onto the worker host, strips source snippets from image evidence, and confines managed image locators to a configured read-only archive ingress root.
 
 ### P0 — security boundary
 

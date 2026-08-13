@@ -31,6 +31,7 @@ class ScanKind(StrEnum):
     TLS = "tls"
     CERTIFICATE = "certificate"
     SSH = "ssh"
+    CONTAINER = "container"
 
 
 class ScanStatus(StrEnum):
