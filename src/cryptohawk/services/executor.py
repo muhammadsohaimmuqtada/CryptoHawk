@@ -6,7 +6,11 @@ from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanKind
 from cryptohawk.domain.models import CryptoObservation, Finding
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.certificates import CertificateScanner
-from cryptohawk.scanners.container_image import ContainerImageCollection, ContainerImageScanner
+from cryptohawk.scanners.container_image import (
+    ContainerImageCollection,
+    ContainerImageScanError,
+    ContainerImageScanner,
+)
 from cryptohawk.scanners.repository import RepositoryCollection
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.ssh import SSHScanner
@@ -134,7 +138,10 @@ class AssetScanExecutor:
             ).observations
 
         if asset.kind == ManagedAssetKind.CONTAINER:
-            return self.container_scanner.scan(asset).observations
+            try:
+                return self.container_scanner.scan(asset).observations
+            except ContainerImageScanError as exc:
+                raise AssetScanError(str(exc)) from exc
 
         if asset.kind == ManagedAssetKind.TLS_ENDPOINT:
             hostname, port = self.parse_endpoint_locator(
