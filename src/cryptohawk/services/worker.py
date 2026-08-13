@@ -4,9 +4,12 @@ import logging
 import time
 from dataclasses import dataclass
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ManagedAssetKind
 from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
+from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.queue import ScanQueueRepository
@@ -44,12 +47,14 @@ class ScanWorker:
         *,
         executor: AssetScanExecutor,
         config: WorkerConfig,
+        history: ContinuousRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.findings = findings
         self.queue = queue
         self.executor = executor
         self.config = config
+        self.history = history
 
     def run_once(self) -> bool:
         self.queue.recover_expired_leases()
@@ -84,6 +89,8 @@ class ScanWorker:
             if self._heartbeat_or_cancel(job.id):
                 return True
             results = self.executor.execute(asset, timeout=self.config.scan_timeout)
+            if self.history is not None:
+                results = self.history.prepare_findings(job.id, results)
 
             if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
                 self.queue.acknowledge_cancel(
@@ -98,6 +105,13 @@ class ScanWorker:
                 managed_asset_id=asset.id,
                 scan_job_id=job.id,
             )
+            if self.history is not None:
+                self.history.record_successful_scan(
+                    workspace_id=job.workspace_id,
+                    asset_id=asset.id,
+                    scan_job_id=job.id,
+                    findings=results,
+                )
             self.queue.complete(
                 job_id=job.id,
                 worker_id=self.config.worker_id,
@@ -105,7 +119,9 @@ class ScanWorker:
             )
             return True
         except Exception as exc:
-            retryable = isinstance(exc, OSError) and not isinstance(exc, AssetScanError)
+            retryable = (
+                isinstance(exc, OSError) and not isinstance(exc, AssetScanError)
+            ) or isinstance(exc, SQLAlchemyError)
             logger.warning(
                 "scan job %s failed on attempt %s/%s: %s",
                 job.id,
