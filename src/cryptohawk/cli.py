@@ -17,6 +17,7 @@ from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
+from cryptohawk.services.container_runtime import build_container_scanner
 from cryptohawk.services.executor import AssetScanExecutor
 from cryptohawk.services.repository_runtime import build_repository_scanner
 from cryptohawk.services.scheduler import ScanScheduler, SchedulerConfig
@@ -49,6 +50,15 @@ def main() -> None:
     source = sub.add_parser("scan-source", help="Scan source tree for cryptographic assets")
     source.add_argument("path")
     source.add_argument("--no-persist", action="store_true")
+
+    image = sub.add_parser(
+        "scan-image",
+        help="Scan an OCI or Docker image archive for cryptographic exposure",
+    )
+    image.add_argument("path")
+    image.add_argument("--image-ref")
+    image.add_argument("--oci-ref")
+    image.add_argument("--no-persist", action="store_true")
 
     tls = sub.add_parser("scan-tls", help="Inspect TLS endpoint cryptography")
     tls.add_argument("hostname")
@@ -116,6 +126,16 @@ def main() -> None:
         if not args.no_persist:
             repo.upsert_many(findings)
         _print(findings)
+    elif args.command == "scan-image":
+        collection = build_container_scanner().scan_path(
+            args.path,
+            image_ref=args.image_ref,
+            oci_ref=args.oci_ref,
+        )
+        findings = [engine.assess(obs) for obs in collection.observations]
+        if not args.no_persist:
+            repo.upsert_many(findings)
+        _print(findings)
     elif args.command == "scan-tls":
         scanner = TLSScanner(allow_private_targets=settings.allow_private_targets)
         findings = [engine.assess(obs) for obs in scanner.scan(args.hostname, args.port)]
@@ -160,6 +180,7 @@ def main() -> None:
             risk_engine=engine,
             source_scanner=SourceScanner(),
             repository_scanner=build_repository_scanner(inventory, continuous),
+            container_scanner=build_container_scanner(),
             tls_scanner=TLSScanner(allow_private_targets=settings.allow_private_targets),
             certificate_scanner=CertificateScanner(
                 allow_private_targets=settings.allow_private_targets
