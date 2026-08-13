@@ -40,11 +40,13 @@ Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is 
 - [x] Idempotent collector runs and deduplicated observations
 - [x] Evidence history and scan provenance retained across rescans
 - [x] Structured application logs, metrics, traces, and health/readiness probes
-- [ ] PostgreSQL backup/restore procedure tested
+- [x] PostgreSQL backup/restore procedure tested
 - [ ] Load and soak tests for realistic asset volumes
 - [ ] Failure injection for worker/network/database interruptions
 
 Application telemetry uses structured JSON logs with request/trace/job correlation and token redaction, low-cardinality Prometheus metrics without tenant identifiers, OpenTelemetry spans with W3C trace-context continuation and optional OTLP/HTTP export, and separate liveness/readiness probes. API readiness verifies database connectivity and Docker Compose gates the web tier on API readiness.
+
+PostgreSQL disaster recovery uses checksum-protected custom-format backups, refuses non-empty restore targets, restores in a fail-fast single transaction, and is exercised in CI against PostgreSQL 17. The recovery drill verifies restored authentication, workspace/assets, encrypted connector credentials, successful scan evidence/history, schedules, durable queue state, audit events, quota runtime and Alembic revision before the gate passes. The operator procedure is documented in `docs/POSTGRES_DISASTER_RECOVERY.md`.
 
 Continuous scanning uses deterministic schedule occurrence IDs and per-scan observation IDs so scheduler crashes and worker retries do not create duplicate work or evidence. Successful scans retain scanner/policy provenance, observation occurrences, first/last-seen state, evidence hashes, and drift events.
 
