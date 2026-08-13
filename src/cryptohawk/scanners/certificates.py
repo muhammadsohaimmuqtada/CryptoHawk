@@ -7,7 +7,7 @@ from ipaddress import IPv4Address, IPv6Address
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, ed448, rsa
+from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 
 from cryptohawk.domain.models import (
     AssetType,
