@@ -4,7 +4,6 @@ import hashlib
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
@@ -36,6 +35,13 @@ from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.time import as_utc
 
 POLICY_VERSION = "risk-engine-v1"
+
+
+def _utc(value: datetime | None = None) -> datetime:
+    normalized = as_utc(value or datetime.now(UTC))
+    if normalized is None:
+        raise ValueError("datetime value is required")
+    return normalized
 
 
 class ScanScheduleRecord(Base):
@@ -212,13 +218,14 @@ class ContinuousRepository:
         if self.inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id) is None:
             raise LookupError("asset not found in workspace")
 
-        current = now or datetime.now(UTC)
+        current = _utc(now)
+        next_run_at = _utc(first_run_at) if first_run_at is not None else current
         schedule = ScanSchedule(
             workspace_id=workspace_id,
             asset_id=asset_id,
             interval_seconds=interval_seconds,
             max_attempts=max_attempts,
-            next_run_at=first_run_at or current,
+            next_run_at=next_run_at,
             created_by=created_by,
             created_at=current,
             updated_at=current,
@@ -274,10 +281,10 @@ class ContinuousRepository:
         resume_at: datetime | None = None,
         now: datetime | None = None,
     ) -> ScanSchedule:
-        current = now or datetime.now(UTC)
+        current = _utc(now)
         values: dict[str, object] = {"enabled": enabled, "updated_at": current}
         if enabled and resume_at is not None:
-            values["next_run_at"] = resume_at
+            values["next_run_at"] = _utc(resume_at)
         with self.SessionLocal() as session:
             result = session.execute(
                 update(ScanScheduleRecord)
@@ -315,7 +322,7 @@ class ContinuousRepository:
         now: datetime | None = None,
         limit: int = 100,
     ) -> list[ScanSchedule]:
-        current = now or datetime.now(UTC)
+        current = _utc(now)
         if not 1 <= limit <= 1000:
             raise ValueError("schedule batch limit must be between 1 and 1000")
         with self.SessionLocal() as session:
@@ -337,7 +344,8 @@ class ContinuousRepository:
         scheduled_for: datetime,
         now: datetime | None = None,
     ) -> bool:
-        current = now or datetime.now(UTC)
+        current = _utc(now)
+        scheduled_for = _utc(scheduled_for)
         next_run = scheduled_for + timedelta(seconds=schedule.interval_seconds)
         while next_run <= current:
             next_run += timedelta(seconds=schedule.interval_seconds)
@@ -370,7 +378,8 @@ class ContinuousRepository:
         scheduled_for: datetime,
         now: datetime | None = None,
     ) -> None:
-        current = now or datetime.now(UTC)
+        current = _utc(now)
+        scheduled_for = _utc(scheduled_for)
         with self.SessionLocal() as session:
             existing = session.scalar(
                 select(ScheduledExecutionRecord).where(
@@ -467,7 +476,7 @@ class ContinuousRepository:
         scanner_version: str = __version__,
         policy_version: str = POLICY_VERSION,
     ) -> list[DriftEvent]:
-        current = now or datetime.now(UTC)
+        current = _utc(now)
         prepared = self.prepare_findings(scan_job_id, findings)
         current_by_fingerprint = {
             self.observation_fingerprint(finding): finding for finding in prepared
@@ -744,9 +753,7 @@ class ContinuousRepository:
 
     @staticmethod
     def scheduled_job_id(schedule_id: str, scheduled_for: datetime) -> str:
-        normalized = as_utc(scheduled_for)
-        if normalized is None:
-            raise ValueError("scheduled_for is required")
+        normalized = _utc(scheduled_for)
         return hashlib.sha256(
             f"schedule:{schedule_id}|at:{normalized.isoformat()}".encode()
         ).hexdigest()
@@ -795,11 +802,11 @@ class ContinuousRepository:
             interval_seconds=row.interval_seconds,
             max_attempts=row.max_attempts,
             enabled=row.enabled,
-            next_run_at=as_utc(row.next_run_at),
+            next_run_at=_utc(row.next_run_at),
             last_run_at=as_utc(row.last_run_at),
             created_by=row.created_by,
-            created_at=as_utc(row.created_at),
-            updated_at=as_utc(row.updated_at),
+            created_at=_utc(row.created_at),
+            updated_at=_utc(row.updated_at),
         )
 
     @staticmethod
@@ -811,7 +818,7 @@ class ContinuousRepository:
             origin=ScanOrigin(row.origin),
             schedule_id=row.schedule_id,
             scheduled_for=as_utc(row.scheduled_for),
-            completed_at=as_utc(row.completed_at),
+            completed_at=_utc(row.completed_at),
             finding_count=row.finding_count,
             scanner_version=row.scanner_version,
             policy_version=row.policy_version,
@@ -825,8 +832,8 @@ class ContinuousRepository:
             asset_id=row.asset_id,
             fingerprint=row.fingerprint,
             active=row.active,
-            first_seen=as_utc(row.first_seen),
-            last_seen=as_utc(row.last_seen),
+            first_seen=_utc(row.first_seen),
+            last_seen=_utc(row.last_seen),
             first_job_id=row.first_job_id,
             last_job_id=row.last_job_id,
             occurrence_count=row.occurrence_count,
@@ -866,6 +873,6 @@ class ContinuousRepository:
             new_risk_score=row.new_risk_score,
             previous_severity=row.previous_severity,
             new_severity=row.new_severity,
-            occurred_at=as_utc(row.occurred_at),
+            occurred_at=_utc(row.occurred_at),
             details=json.loads(row.details_json),
         )
