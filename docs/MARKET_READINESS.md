@@ -24,10 +24,12 @@ All P0 items must be complete and covered by CI before CryptoHawk is described a
 - [x] Authentication and API-key support
 - [x] Workspace membership and RBAC enforced at service/data layers
 - [x] Audit log for security-sensitive and administrative actions
-- [ ] Rate limits, request quotas, and scan concurrency controls
-- [ ] Secret handling policy and encrypted connector credentials
+- [x] Rate limits, request quotas, and scan concurrency controls
+- [x] Secret handling policy and encrypted connector credentials
 - [x] Database migrations with tested upgrade/rollback path
 - [x] Security headers, hardened production configuration, and dependency scanning
+
+Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is covered by CI tests for encrypted-at-rest storage, authenticated decryption, tenant isolation, key rotation, RBAC, API redaction, and audit redaction.
 
 ### P0 — reliability and evidence
 
