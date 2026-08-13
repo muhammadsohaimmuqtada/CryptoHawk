@@ -23,7 +23,16 @@ class FakeExecutor:
         self.fail_once = fail_once
         self.calls = 0
 
-    def execute(self, asset, *, source=None, filename=None, timeout=5.0):
+    def execute(
+        self,
+        asset,
+        *,
+        source=None,
+        filename=None,
+        timeout=5.0,
+        scan_job_id=None,
+    ):
+        del source, filename, timeout, scan_job_id
         self.calls += 1
         if self.fail_once and self.calls == 1:
             raise OSError("temporary network failure")
