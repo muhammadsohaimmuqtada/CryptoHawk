@@ -283,12 +283,23 @@ def run(database_url: str, postgres_container: str) -> None:
         _restart_postgres(postgres_container)
     _expect(database_went_down, "database interruption did not break the in-flight worker")
 
-    # Reuse the same engine objects after the restart. pool_pre_ping must discard
-    # stale connections and let the durable lease be reconciled by a new worker.
+    # Reuse the same engine objects after restart. pool_pre_ping must discard stale
+    # connections. Then let the real wall clock cross the existing durable lease
+    # deadline instead of manufacturing a future queue timestamp that a replacement
+    # ScanWorker cannot yet observe.
     with inventory.engine.connect() as connection:
         _expect(connection.execute(text("SELECT 1")).scalar_one() == 1, "database did not recover")
 
-    requeued, failed = queue.recover_expired_leases(now=datetime.now(UTC) + timedelta(seconds=10))
+    outage_state = queue.get_state(database_job.id)
+    _expect(
+        outage_state is not None and outage_state.lease_expires_at is not None,
+        "database-outage job lost its durable lease state",
+    )
+    remaining = (outage_state.lease_expires_at - datetime.now(UTC)).total_seconds()
+    if remaining > 0:
+        time.sleep(remaining + 0.25)
+
+    requeued, failed = queue.recover_expired_leases()
     _expect((requeued, failed) == (1, 0), "database-outage lease was not recovered")
     recovery_worker = _worker(
         inventory,
