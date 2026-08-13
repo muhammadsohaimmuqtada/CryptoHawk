@@ -39,10 +39,12 @@ Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is 
 
 - [x] Idempotent collector runs and deduplicated observations
 - [x] Evidence history and scan provenance retained across rescans
-- [ ] Structured application logs, metrics, traces, and health/readiness probes
+- [x] Structured application logs, metrics, traces, and health/readiness probes
 - [ ] PostgreSQL backup/restore procedure tested
 - [ ] Load and soak tests for realistic asset volumes
 - [ ] Failure injection for worker/network/database interruptions
+
+Application telemetry uses structured JSON logs with request/trace/job correlation and token redaction, low-cardinality Prometheus metrics without tenant identifiers, OpenTelemetry spans with W3C trace-context continuation and optional OTLP/HTTP export, and separate liveness/readiness probes. API readiness verifies database connectivity and Docker Compose gates the web tier on API readiness.
 
 Continuous scanning uses deterministic schedule occurrence IDs and per-scan observation IDs so scheduler crashes and worker retries do not create duplicate work or evidence. Successful scans retain scanner/policy provenance, observation occurrences, first/last-seen state, evidence hashes, and drift events.
 

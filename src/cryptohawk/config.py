@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     bootstrap_attempts_per_hour: int = 5
     scan_submissions_per_minute: int = 30
     workspace_scan_concurrency: int = 4
+    log_level: str = "INFO"
+    metrics_enabled: bool = True
+    metrics_path: str = "/metrics"
+    otel_service_name: str = "cryptohawk"
+    otel_traces_endpoint: str = ""
+    otel_export_timeout_seconds: float = 5.0
     connector_encryption_keys: str = ""
     connector_encryption_active_version: int = 1
     repository_allowed_hosts: str = "github.com,gitlab.com"

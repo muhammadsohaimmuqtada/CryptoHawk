@@ -2,15 +2,30 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from uuid import uuid4
 
 from fastapi import Request, Response
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from cryptohawk.api.auth import inventory
 from cryptohawk.config import settings
 from cryptohawk.domain.audit import AuditEvent, AuditOutcome
 from cryptohawk.domain.auth import Principal
+from cryptohawk.observability import (
+    HTTP_IN_PROGRESS,
+    bind_context,
+    configure_observability,
+    current_trace_id,
+    extract_trace_context,
+    liveness_response,
+    log_event,
+    metrics_response,
+    readiness_response,
+    record_http_request,
+    tracer,
+)
 from cryptohawk.storage.audit import AuditRepository
 
 logger = logging.getLogger(__name__)
@@ -26,13 +41,101 @@ class SecurityAuditMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
+        configure_observability()
         request_id = self._request_id(request)
         request.state.request_id = request_id
-        response = await call_next(request)
-        self._apply_security_headers(request, response, request_id)
-        if self._should_audit(request):
-            self._write_audit_event(request, response, request_id)
-        return response
+        method = request.method.upper()
+        started = time.perf_counter()
+        HTTP_IN_PROGRESS.labels(method).inc()
+        parent_context = extract_trace_context(request.headers)
+        response: Response | None = None
+        metric_route = "unmatched"
+        trace_id: str | None = None
+
+        try:
+            with tracer("cryptohawk.api").start_as_current_span(
+                "HTTP request",
+                context=parent_context,
+                kind=SpanKind.SERVER,
+            ) as span:
+                trace_id = current_trace_id()
+                request.state.trace_id = trace_id
+                with bind_context(
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    component="api",
+                ):
+                    try:
+                        response = self._operational_response(request)
+                        if response is None:
+                            response = await call_next(request)
+                    except Exception as exc:
+                        metric_route = self._metric_route(request)
+                        duration = time.perf_counter() - started
+                        span.update_name(f"{method} {metric_route}")
+                        self._set_span_http_attributes(
+                            span,
+                            request=request,
+                            route=metric_route,
+                            status_code=500,
+                        )
+                        span.record_exception(exc)
+                        span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+                        record_http_request(
+                            method=method,
+                            route=metric_route,
+                            status_code=500,
+                            duration_seconds=duration,
+                            trace_id=trace_id,
+                        )
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "http.request.failed",
+                            exc_info=True,
+                            method=method,
+                            route=metric_route,
+                            status_code=500,
+                            duration_ms=round(duration * 1000, 3),
+                            error_type=type(exc).__name__,
+                        )
+                        raise
+
+                    metric_route = self._metric_route(request)
+                    duration = time.perf_counter() - started
+                    span.update_name(f"{method} {metric_route}")
+                    self._set_span_http_attributes(
+                        span,
+                        request=request,
+                        route=metric_route,
+                        status_code=response.status_code,
+                    )
+                    if response.status_code >= 500:
+                        span.set_status(Status(StatusCode.ERROR))
+
+                    self._apply_security_headers(request, response, request_id, trace_id)
+                    if self._should_audit(request):
+                        self._write_audit_event(request, response, request_id)
+                    record_http_request(
+                        method=method,
+                        route=metric_route,
+                        status_code=response.status_code,
+                        duration_seconds=duration,
+                        trace_id=trace_id,
+                    )
+                    level = logging.WARNING if response.status_code >= 500 else logging.INFO
+                    log_event(
+                        logger,
+                        level,
+                        "http.request.completed",
+                        method=method,
+                        route=metric_route,
+                        status_code=response.status_code,
+                        duration_ms=round(duration * 1000, 3),
+                    )
+                    return response
+        finally:
+            HTTP_IN_PROGRESS.labels(method).dec()
 
     @staticmethod
     def _request_id(request: Request) -> str:
@@ -42,8 +145,53 @@ class SecurityAuditMiddleware(BaseHTTPMiddleware):
         return str(uuid4())
 
     @staticmethod
-    def _apply_security_headers(request: Request, response: Response, request_id: str) -> None:
+    def _operational_response(request: Request) -> Response | None:
+        if request.method.upper() != "GET":
+            return None
+        path = request.url.path
+        if path == "/health/live":
+            return liveness_response()
+        if path == "/health/ready":
+            return readiness_response(audit_repo.inventory.engine)
+        if settings.metrics_enabled and path == settings.metrics_path:
+            return metrics_response()
+        return None
+
+    @staticmethod
+    def _metric_route(request: Request) -> str:
+        if request.url.path in {"/health/live", "/health/ready", settings.metrics_path}:
+            return request.url.path
+        route = request.scope.get("route")
+        path = getattr(route, "path", None)
+        return str(path) if path else "unmatched"
+
+    @staticmethod
+    def _set_span_http_attributes(
+        span,
+        *,
+        request: Request,
+        route: str,
+        status_code: int,
+    ) -> None:
+        span.set_attribute("http.request.method", request.method.upper())
+        span.set_attribute("http.route", route)
+        span.set_attribute("http.response.status_code", status_code)
+        span.set_attribute("url.scheme", request.url.scheme)
+        if request.url.hostname:
+            span.set_attribute("server.address", request.url.hostname)
+        if request.url.port:
+            span.set_attribute("server.port", request.url.port)
+
+    @staticmethod
+    def _apply_security_headers(
+        request: Request,
+        response: Response,
+        request_id: str,
+        trace_id: str | None,
+    ) -> None:
         response.headers["X-Request-ID"] = request_id
+        if trace_id:
+            response.headers["X-Trace-ID"] = trace_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -121,4 +269,10 @@ class SecurityAuditMiddleware(BaseHTTPMiddleware):
         try:
             audit_repo.append(event)
         except Exception:
-            logger.exception("failed to persist audit event %s", event.id)
+            log_event(
+                logger,
+                logging.ERROR,
+                "audit.persist.failed",
+                exc_info=True,
+                audit_event_id=event.id,
+            )

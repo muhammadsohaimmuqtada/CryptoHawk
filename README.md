@@ -4,7 +4,7 @@
 
 CryptoHawk discovers cryptography across source repositories, container images and live services, turns observations into an evidence-backed inventory, scores cryptographic and quantum exposure deterministically, recommends migration targets, tracks drift, and exports a CycloneDX 1.7 Cryptography Bill of Materials (CBOM).
 
-> Status: **pre-market engineering build** — authenticated multi-workspace inventory, encrypted connector credentials, durable workers, scheduled scans, drift history, repository-native incremental discovery, OCI/Docker image archive discovery, TLS/X.509 inspection, certificate-estate discovery, SSH host-key discovery, deterministic risk assessment, CBOM export, REST API, CLI, React command center, Docker deployment and CI are implemented. CryptoHawk is not yet declared production-ready; see `docs/MARKET_READINESS.md`.
+> Status: **pre-market engineering build** — authenticated multi-workspace inventory, encrypted connector credentials, durable workers, scheduled scans, drift history, repository-native incremental discovery, OCI/Docker image archive discovery, TLS/X.509 inspection, certificate-estate discovery, SSH host-key discovery, deterministic risk assessment, CBOM export, structured telemetry, REST API, CLI, React command center, Docker deployment and CI are implemented. CryptoHawk is not yet declared production-ready; see `docs/MARKET_READINESS.md`.
 
 ## Why CryptoHawk exists
 
@@ -32,6 +32,10 @@ The core decision engine is deterministic. Findings carry source evidence, confi
 - Authenticated workspaces, membership/RBAC, API keys, audit events, quotas and scan concurrency controls
 - Durable scan queue with leases, retries, cancellation and crash reconciliation
 - Scheduled scans, evidence history and cryptographic drift detection
+- Structured JSON application logs with request, trace and scan-job correlation plus credential/token redaction
+- Prometheus request/scan/worker/scheduler/readiness metrics with low-cardinality labels and no tenant identifiers
+- OpenTelemetry spans with W3C trace-context continuation and optional OTLP/HTTP export
+- Process liveness and database-backed readiness probes; Compose gates the web tier on API readiness
 - Risk-prioritized REST API and React command center
 - CycloneDX **1.7** CBOM export using `cryptographic-asset` components
 - CLI for source, image, TLS, certificate and SSH scanning, API serving, workers, scheduler and CBOM export
@@ -63,6 +67,8 @@ Source / Git repositories / OCI-Docker images / TLS / X.509 / SSH
                           ├──── REST API
                           ├──── React Dashboard
                           └──── CycloneDX 1.7 CBOM
+                          │
+                          └──── JSON logs / Prometheus / OpenTelemetry
 ```
 
 ## Quick start
@@ -127,6 +133,16 @@ The primary API is workspace-scoped under `/api/v1/workspaces/{workspace_id}` an
 
 Interactive OpenAPI documentation is available at `/docs` while the API is running.
 
+### Operational endpoints
+
+- `GET /health/live` — process liveness only; it does not depend on the database.
+- `GET /health/ready` — readiness check with a live database query; returns HTTP 503 when the database is unavailable.
+- `GET /metrics` — Prometheus exposition when `CRYPTOHAWK_METRICS_ENABLED=true`.
+
+Every API response receives `X-Request-ID`; traced requests also receive `X-Trace-ID`. Incoming W3C `traceparent` headers are continued rather than replaced. Prometheus labels use route templates rather than raw workspace/resource paths so tenant IDs do not become metric labels.
+
+Set `CRYPTOHAWK_OTEL_TRACES_ENDPOINT` to an OTLP/HTTP traces endpoint such as `http://otel-collector:4318/v1/traces` to export spans. Leaving it empty preserves local trace correlation without requiring an external collector.
+
 ## Standards direction
 
 CryptoHawk is designed around public standards rather than a proprietary inventory format:
@@ -136,12 +152,14 @@ CryptoHawk is designed around public standards rather than a proprietary invento
 - NIST FIPS 205 — SLH-DSA
 - CycloneDX 1.7 Cryptography Bill of Materials / cryptographic asset model
 - OCI Image Format for image manifests, content descriptors and filesystem layer changesets
+- OpenTelemetry for distributed tracing and OTLP export
+- Prometheus exposition for operational metrics
 
 CryptoHawk-specific risk metadata is emitted as namespaced CycloneDX properties so the CBOM stays portable while retaining operational context.
 
 ## Roadmap
 
-The next major slices are structured observability and readiness probes, PostgreSQL backup/restore validation, load/soak and failure-injection testing, stronger asset onboarding/operator workflows, migration ownership/status tracking, policy packs, exportable reports, native registry ingestion and enterprise SSO/OIDC.
+The next major reliability slices are PostgreSQL backup/restore validation, load/soak testing and failure injection for worker/network/database interruptions. Product work then moves into stronger asset onboarding/operator workflows, migration ownership/status tracking, policy packs, exportable reports, native registry ingestion and enterprise SSO/OIDC.
 
 ### Collector safety
 

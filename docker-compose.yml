@@ -30,11 +30,24 @@ services:
       CRYPTOHAWK_CORS_ORIGINS: http://localhost:3000
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
       CRYPTOHAWK_CONTAINER_ARCHIVE_ROOT: /var/lib/cryptohawk/images
+      CRYPTOHAWK_OTEL_TRACES_ENDPOINT: ${CRYPTOHAWK_OTEL_TRACES_ENDPOINT:-}
     volumes:
       - ${CRYPTOHAWK_CONTAINER_ARCHIVE_HOST_PATH:-./container-images}:/var/lib/cryptohawk/images:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     ports:
       - "8000:8000"
 
@@ -51,6 +64,7 @@ services:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
       CRYPTOHAWK_CONTAINER_ARCHIVE_ROOT: /var/lib/cryptohawk/images
+      CRYPTOHAWK_OTEL_TRACES_ENDPOINT: ${CRYPTOHAWK_OTEL_TRACES_ENDPOINT:-}
     volumes:
       - ${CRYPTOHAWK_CONTAINER_ARCHIVE_HOST_PATH:-./container-images}:/var/lib/cryptohawk/images:ro
     depends_on:
@@ -70,6 +84,7 @@ services:
     environment:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-dev@db:5432/cryptohawk
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
+      CRYPTOHAWK_OTEL_TRACES_ENDPOINT: ${CRYPTOHAWK_OTEL_TRACES_ENDPOINT:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -78,7 +93,8 @@ services:
   web:
     build: ./frontend
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "3000:80"
 

@@ -4,10 +4,18 @@ import logging
 import time
 from dataclasses import dataclass
 
+from opentelemetry.trace import Status, StatusCode
 from sqlalchemy.exc import SQLAlchemyError
 
 from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ManagedAssetKind
+from cryptohawk.observability import (
+    WORKER_POLLS,
+    configure_observability,
+    log_event,
+    record_scan_attempt,
+    traced_operation,
+)
 from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
@@ -57,6 +65,7 @@ class ScanWorker:
         self.history = history
 
     def run_once(self) -> bool:
+        configure_observability()
         self.queue.recover_expired_leases()
         lease = self.queue.claim_next(
             worker_id=self.config.worker_id,
@@ -64,86 +73,126 @@ class ScanWorker:
             concurrency_limit=settings.workspace_scan_concurrency,
         )
         if lease is None:
+            WORKER_POLLS.labels("idle").inc()
             return False
 
+        WORKER_POLLS.labels("claimed").inc()
         job = lease.job
-        try:
-            if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
-                self.queue.acknowledge_cancel(
-                    job_id=job.id,
-                    worker_id=self.config.worker_id,
-                )
-                return True
+        started = time.perf_counter()
+        outcome = "failed"
+        with traced_operation(
+            "scan.worker.execute",
+            attributes={
+                "cryptohawk.scan.kind": job.kind.value,
+                "cryptohawk.scan.execution": "worker",
+                "cryptohawk.scan.attempt": lease.attempt,
+                "cryptohawk.scan.max_attempts": lease.max_attempts,
+            },
+            job_id=job.id,
+            component="worker",
+        ) as span:
+            try:
+                if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
+                    self.queue.acknowledge_cancel(
+                        job_id=job.id,
+                        worker_id=self.config.worker_id,
+                    )
+                    outcome = "canceled"
+                    return True
 
-            asset = self.inventory.get_asset(
-                workspace_id=job.workspace_id,
-                asset_id=job.asset_id,
-            )
-            if asset is None:
-                raise AssetScanError("managed asset no longer exists")
-            if asset.kind == ManagedAssetKind.SOURCE:
-                raise AssetScanError(
-                    "durable source scans require a repository-backed source collector"
-                )
-
-            if self._heartbeat_or_cancel(job.id):
-                return True
-            results = self.executor.execute(
-                asset,
-                timeout=self.config.scan_timeout,
-                scan_job_id=job.id,
-            )
-            if self.history is not None:
-                results = self.history.prepare_findings(job.id, results)
-
-            if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
-                self.queue.acknowledge_cancel(
-                    job_id=job.id,
-                    worker_id=self.config.worker_id,
-                )
-                return True
-
-            self.findings.upsert_many(
-                results,
-                workspace_id=job.workspace_id,
-                managed_asset_id=asset.id,
-                scan_job_id=job.id,
-            )
-            if self.history is not None:
-                self.history.record_successful_scan(
+                asset = self.inventory.get_asset(
                     workspace_id=job.workspace_id,
-                    asset_id=asset.id,
-                    scan_job_id=job.id,
-                    findings=results,
+                    asset_id=job.asset_id,
                 )
-            self.queue.complete(
-                job_id=job.id,
-                worker_id=self.config.worker_id,
-                findings_count=len(results),
-            )
-            return True
-        except Exception as exc:
-            retryable = (
-                isinstance(exc, OSError) and not isinstance(exc, AssetScanError)
-            ) or isinstance(exc, SQLAlchemyError)
-            logger.warning(
-                "scan job %s failed on attempt %s/%s: %s",
-                job.id,
-                lease.attempt,
-                lease.max_attempts,
-                exc,
-            )
-            self.queue.fail(
-                job_id=job.id,
-                worker_id=self.config.worker_id,
-                error_message=str(exc),
-                retryable=retryable,
-                backoff_seconds=self.config.retry_backoff_seconds,
-            )
-            return True
+                if asset is None:
+                    raise AssetScanError("managed asset no longer exists")
+                if asset.kind == ManagedAssetKind.SOURCE:
+                    raise AssetScanError(
+                        "durable source scans require a repository-backed source collector"
+                    )
+
+                if self._heartbeat_or_cancel(job.id):
+                    outcome = "canceled"
+                    return True
+                results = self.executor.execute(
+                    asset,
+                    timeout=self.config.scan_timeout,
+                    scan_job_id=job.id,
+                )
+                if self.history is not None:
+                    results = self.history.prepare_findings(job.id, results)
+
+                if self.queue.should_cancel(job_id=job.id, worker_id=self.config.worker_id):
+                    self.queue.acknowledge_cancel(
+                        job_id=job.id,
+                        worker_id=self.config.worker_id,
+                    )
+                    outcome = "canceled"
+                    return True
+
+                self.findings.upsert_many(
+                    results,
+                    workspace_id=job.workspace_id,
+                    managed_asset_id=asset.id,
+                    scan_job_id=job.id,
+                )
+                if self.history is not None:
+                    self.history.record_successful_scan(
+                        workspace_id=job.workspace_id,
+                        asset_id=asset.id,
+                        scan_job_id=job.id,
+                        findings=results,
+                    )
+                self.queue.complete(
+                    job_id=job.id,
+                    worker_id=self.config.worker_id,
+                    findings_count=len(results),
+                )
+                outcome = "succeeded"
+                span.set_attribute("cryptohawk.scan.findings_count", len(results))
+                return True
+            except Exception as exc:
+                retryable = (
+                    isinstance(exc, OSError) and not isinstance(exc, AssetScanError)
+                ) or isinstance(exc, SQLAlchemyError)
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "scan.worker.failed",
+                    worker_id=self.config.worker_id,
+                    scan_kind=job.kind.value,
+                    attempt=lease.attempt,
+                    max_attempts=lease.max_attempts,
+                    retryable=retryable,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+                self.queue.fail(
+                    job_id=job.id,
+                    worker_id=self.config.worker_id,
+                    error_message=str(exc),
+                    retryable=retryable,
+                    backoff_seconds=self.config.retry_backoff_seconds,
+                )
+                return True
+            finally:
+                record_scan_attempt(
+                    kind=job.kind.value,
+                    execution="worker",
+                    outcome=outcome,
+                    duration_seconds=time.perf_counter() - started,
+                )
 
     def run_forever(self) -> None:
-        logger.info("CryptoHawk worker %s started", self.config.worker_id)
+        configure_observability()
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.started",
+            worker_id=self.config.worker_id,
+        )
         while True:
             worked = self.run_once()
             if not worked:

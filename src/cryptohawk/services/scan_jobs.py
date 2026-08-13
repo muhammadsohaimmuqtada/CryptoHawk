@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+
 from cryptohawk.config import settings
 from cryptohawk.domain.inventory import ScanJob, ScanStatus
 from cryptohawk.domain.models import Finding
+from cryptohawk.observability import record_scan_attempt, traced_operation
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.source import SourceScanner
@@ -74,6 +77,7 @@ class ScanJobService:
         asset = self.inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id)
         if asset is None:
             raise LookupError("asset not found in workspace")
+        kind = self.executor.scan_kind(asset)
 
         if self.quota is not None:
             self.quota.require_scan_slot(
@@ -85,7 +89,7 @@ class ScanJobService:
             job = self.inventory.create_scan_job(
                 workspace_id=workspace_id,
                 asset_id=asset_id,
-                kind=self.executor.scan_kind(asset),
+                kind=kind,
             )
             self.inventory.transition_scan_job(
                 workspace_id=workspace_id,
@@ -94,44 +98,64 @@ class ScanJobService:
                 target=ScanStatus.RUNNING,
             )
 
-            try:
-                results = self.executor.execute(
-                    asset,
-                    source=source,
-                    filename=filename,
-                    timeout=timeout,
-                    scan_job_id=job.id,
-                )
-                results = self.history.prepare_findings(job.id, results)
-                self.findings.upsert_many(
-                    results,
-                    workspace_id=workspace_id,
-                    managed_asset_id=asset.id,
-                    scan_job_id=job.id,
-                )
-                self.history.record_successful_scan(
-                    workspace_id=workspace_id,
-                    asset_id=asset.id,
-                    scan_job_id=job.id,
-                    findings=results,
-                )
-                job = self.inventory.transition_scan_job(
-                    workspace_id=workspace_id,
-                    job_id=job.id,
-                    expected=ScanStatus.RUNNING,
-                    target=ScanStatus.SUCCEEDED,
-                    findings_count=len(results),
-                )
-                return job, results
-            except Exception as exc:
-                self.inventory.transition_scan_job(
-                    workspace_id=workspace_id,
-                    job_id=job.id,
-                    expected=ScanStatus.RUNNING,
-                    target=ScanStatus.FAILED,
-                    error_message=str(exc),
-                )
-                raise
+            started = time.perf_counter()
+            outcome = "failed"
+            with traced_operation(
+                "scan.sync.execute",
+                attributes={
+                    "cryptohawk.scan.kind": kind.value,
+                    "cryptohawk.scan.execution": "sync",
+                },
+                job_id=job.id,
+                component="api",
+            ) as span:
+                try:
+                    results = self.executor.execute(
+                        asset,
+                        source=source,
+                        filename=filename,
+                        timeout=timeout,
+                        scan_job_id=job.id,
+                    )
+                    results = self.history.prepare_findings(job.id, results)
+                    self.findings.upsert_many(
+                        results,
+                        workspace_id=workspace_id,
+                        managed_asset_id=asset.id,
+                        scan_job_id=job.id,
+                    )
+                    self.history.record_successful_scan(
+                        workspace_id=workspace_id,
+                        asset_id=asset.id,
+                        scan_job_id=job.id,
+                        findings=results,
+                    )
+                    job = self.inventory.transition_scan_job(
+                        workspace_id=workspace_id,
+                        job_id=job.id,
+                        expected=ScanStatus.RUNNING,
+                        target=ScanStatus.SUCCEEDED,
+                        findings_count=len(results),
+                    )
+                    outcome = "succeeded"
+                    span.set_attribute("cryptohawk.scan.findings_count", len(results))
+                    return job, results
+                except Exception as exc:
+                    self.inventory.transition_scan_job(
+                        workspace_id=workspace_id,
+                        job_id=job.id,
+                        expected=ScanStatus.RUNNING,
+                        target=ScanStatus.FAILED,
+                        error_message=str(exc),
+                    )
+                    raise
+                finally:
+                    record_scan_attempt(
+                        kind=kind.value,
+                        execution="sync",
+                        outcome=outcome,
+                        duration_seconds=time.perf_counter() - started,
+                    )
         finally:
             if self.quota is not None:
                 self.quota.release_scan_slot(workspace_id=workspace_id)
