@@ -18,12 +18,26 @@ class Settings(BaseSettings):
     workspace_scan_concurrency: int = 4
     connector_encryption_keys: str = ""
     connector_encryption_active_version: int = 1
+    repository_allowed_hosts: str = "github.com,gitlab.com"
+    repository_fetch_depth: int = 100
+    repository_git_timeout_seconds: int = 120
+    repository_max_files: int = 20_000
+    repository_max_scan_bytes: int = 100_000_000
+    repository_max_file_bytes: int = 2_000_000
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def repository_allowed_host_list(self) -> list[str]:
+        return [
+            host.strip().lower().rstrip(".")
+            for host in self.repository_allowed_hosts.split(",")
+            if host.strip()
+        ]
 
 
 settings = Settings()
