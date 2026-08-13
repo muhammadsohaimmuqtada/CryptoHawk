@@ -35,7 +35,7 @@ class ScanJobService:
         self.inventory = inventory
         self.findings = findings
         self.quota = quota
-        self.history = history
+        self.history = history or ContinuousRepository(inventory)
         self.executor = executor or AssetScanExecutor(
             risk_engine=risk_engine or RiskEngine(),
             source_scanner=source_scanner or SourceScanner(),
@@ -81,21 +81,19 @@ class ScanJobService:
                     filename=filename,
                     timeout=timeout,
                 )
-                if self.history is not None:
-                    results = self.history.prepare_findings(job.id, results)
+                results = self.history.prepare_findings(job.id, results)
                 self.findings.upsert_many(
                     results,
                     workspace_id=workspace_id,
                     managed_asset_id=asset.id,
                     scan_job_id=job.id,
                 )
-                if self.history is not None:
-                    self.history.record_successful_scan(
-                        workspace_id=workspace_id,
-                        asset_id=asset.id,
-                        scan_job_id=job.id,
-                        findings=results,
-                    )
+                self.history.record_successful_scan(
+                    workspace_id=workspace_id,
+                    asset_id=asset.id,
+                    scan_job_id=job.id,
+                    findings=results,
+                )
                 job = self.inventory.transition_scan_job(
                     workspace_id=workspace_id,
                     job_id=job.id,
