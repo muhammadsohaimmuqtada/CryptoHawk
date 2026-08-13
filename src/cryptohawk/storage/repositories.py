@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -221,7 +221,7 @@ class RepositoryAssetRepository:
             )
             try:
                 session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 session.rollback()
                 existing = session.get(RepositoryScanRunRecord, provenance.scan_job_id)
                 if existing is None:
@@ -230,7 +230,7 @@ class RepositoryAssetRepository:
                 if stored != provenance:
                     raise RuntimeError(
                         "repository scan provenance changed for existing scan job"
-                    )
+                    ) from exc
                 return stored
         return provenance
 
