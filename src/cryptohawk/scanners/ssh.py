@@ -36,7 +36,6 @@ class SSHScanner:
             try:
                 transport = paramiko.Transport(raw)
                 transport.banner_timeout = timeout
-                transport.handshake_timeout = timeout
                 transport.start_client(timeout=timeout)
                 key = transport.get_remote_server_key()
                 remote_version = transport.remote_version
