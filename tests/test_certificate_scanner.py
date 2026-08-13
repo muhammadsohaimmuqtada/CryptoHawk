@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
@@ -44,7 +44,7 @@ def _certificate_der() -> bytes:
         )
         .sign(private_key, hashes.SHA256())
     )
-    return certificate.public_bytes(x509.Encoding.DER)
+    return certificate.public_bytes(serialization.Encoding.DER)
 
 
 def test_certificate_estate_inventory_preserves_identity_and_crypto_metadata() -> None:
