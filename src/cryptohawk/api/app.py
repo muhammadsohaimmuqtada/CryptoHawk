@@ -15,10 +15,8 @@ from cryptohawk.api.auth import (
     inventory,
     require_workspace_role,
 )
-from cryptohawk.api.credentials import (
-    initialize_connector_credentials,
-    router as credential_router,
-)
+from cryptohawk.api.credentials import initialize_connector_credentials
+from cryptohawk.api.credentials import router as credential_router
 from cryptohawk.api.middleware import SecurityAuditMiddleware, audit_repo
 from cryptohawk.api.schemas import (
     ApiKeyCreateRequest,
