@@ -112,11 +112,17 @@ def seed(manifest_path: Path) -> None:
         max_attempts=4,
         created_by=f"session:{owner.subject_id}",
     )
-    queued_job = queue.enqueue(
+
+    history_job = inventory.create_scan_job(
         workspace_id=workspace.id,
         asset_id=asset.id,
         kind=ScanKind.TLS,
-        max_attempts=4,
+    )
+    inventory.transition_scan_job(
+        workspace_id=workspace.id,
+        job_id=history_job.id,
+        expected=ScanStatus.QUEUED,
+        target=ScanStatus.RUNNING,
     )
 
     observation = CryptoObservation(
@@ -135,18 +141,32 @@ def seed(manifest_path: Path) -> None:
         ),
     )
     finding = RiskEngine().assess(observation, asset.context)
-    prepared = continuous.prepare_findings(queued_job.id, [finding])
+    prepared = continuous.prepare_findings(history_job.id, [finding])
     findings.upsert_many(
         prepared,
         workspace_id=workspace.id,
         managed_asset_id=asset.id,
-        scan_job_id=queued_job.id,
+        scan_job_id=history_job.id,
     )
     continuous.record_successful_scan(
         workspace_id=workspace.id,
         asset_id=asset.id,
-        scan_job_id=queued_job.id,
+        scan_job_id=history_job.id,
         findings=prepared,
+    )
+    inventory.transition_scan_job(
+        workspace_id=workspace.id,
+        job_id=history_job.id,
+        expected=ScanStatus.RUNNING,
+        target=ScanStatus.SUCCEEDED,
+        findings_count=len(prepared),
+    )
+
+    queued_job = queue.enqueue(
+        workspace_id=workspace.id,
+        asset_id=asset.id,
+        kind=ScanKind.TLS,
+        max_attempts=4,
     )
 
     connector_secret = "ghp_dr_fixture_token_value_1234567890"
@@ -179,6 +199,7 @@ def seed(manifest_path: Path) -> None:
         limit=10,
         window_seconds=60,
     )
+    quota.scan_capacity(workspace_id=workspace.id, limit=4)
 
     with inventory.engine.connect() as connection:
         alembic_revision = connection.execute(
@@ -195,7 +216,8 @@ def seed(manifest_path: Path) -> None:
             "api_key_id": api_key.metadata.id,
             "asset_id": asset.id,
             "schedule_id": schedule.id,
-            "scan_job_id": queued_job.id,
+            "history_job_id": history_job.id,
+            "queued_job_id": queued_job.id,
             "finding_id": prepared[0].observation.id,
             "credential_id": credential.id,
             "credential_secret": connector_secret,
@@ -218,7 +240,8 @@ def verify(manifest_path: Path) -> None:
     workspace_id = str(data["workspace_id"])
     user_id = str(data["user_id"])
     asset_id = str(data["asset_id"])
-    scan_job_id = str(data["scan_job_id"])
+    history_job_id = str(data["history_job_id"])
+    queued_job_id = str(data["queued_job_id"])
     credential_id = str(data["credential_id"])
 
     workspace = inventory.get_workspace(workspace_id)
@@ -257,15 +280,23 @@ def verify(manifest_path: Path) -> None:
     _expect(schedule is not None and schedule.enabled, "scan schedule was not restored")
     _expect(schedule.max_attempts == 4, "scan schedule retry policy changed")
 
-    job = inventory.get_scan_job(workspace_id=workspace_id, job_id=scan_job_id)
-    _expect(job is not None, "scan job was not restored")
-    _expect(job.status == ScanStatus.QUEUED, "scan job state changed after restore")
+    history_job = inventory.get_scan_job(workspace_id=workspace_id, job_id=history_job_id)
+    _expect(history_job is not None, "completed scan job was not restored")
+    _expect(history_job.status == ScanStatus.SUCCEEDED, "completed scan state changed")
+    _expect(history_job.findings_count == 1, "completed scan finding count changed")
+
+    queued_job = inventory.get_scan_job(workspace_id=workspace_id, job_id=queued_job_id)
+    _expect(queued_job is not None, "queued scan job was not restored")
+    _expect(queued_job.status == ScanStatus.QUEUED, "queued scan state changed after restore")
     lease = queue.claim_next(
         worker_id="dr-verifier",
         lease_seconds=30,
         concurrency_limit=4,
     )
-    _expect(lease is not None and lease.job.id == scan_job_id, "restored queue is not claimable")
+    _expect(
+        lease is not None and lease.job.id == queued_job_id,
+        "restored queue is not claimable",
+    )
 
     restored_findings = findings.list_findings(workspace_id=workspace_id)
     _expect(len(restored_findings) == 1, "restored scoped finding count is incorrect")
@@ -278,6 +309,7 @@ def verify(manifest_path: Path) -> None:
 
     history = continuous.list_scan_history(workspace_id=workspace_id, asset_id=asset_id)
     _expect(len(history) == 1, "scan history was not restored")
+    _expect(history[0].scan_job_id == history_job_id, "scan history job identity changed")
     states = continuous.list_observation_states(
         workspace_id=workspace_id,
         asset_id=asset_id,
@@ -300,8 +332,9 @@ def verify(manifest_path: Path) -> None:
         "audit event was not restored",
     )
 
-    quota_state = quota.capacity(workspace_id=workspace_id, limit=4)
+    quota_state = quota.scan_capacity(workspace_id=workspace_id, limit=4)
     _expect(quota_state.limit == 4, "quota runtime is invalid after restore")
+    _expect(quota_state.active_scans == 1, "restored queue claim did not acquire capacity")
 
     with inventory.engine.connect() as connection:
         restored_revision = connection.execute(
