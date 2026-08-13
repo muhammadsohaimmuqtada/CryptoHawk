@@ -31,7 +31,10 @@ pg_dump \
 pg_restore --list "$tmp_path" >/dev/null
 
 mv -- "$tmp_path" "$backup_path"
-sha256sum "$backup_path" >"${backup_path}.sha256"
+(
+  cd -- "$backup_dir"
+  sha256sum "$backup_name" >"${backup_name}.sha256"
+)
 chmod 600 "$backup_path" "${backup_path}.sha256"
 trap - EXIT INT TERM
 
