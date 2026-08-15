@@ -114,7 +114,7 @@ export type MigrationItem = {
   acceptance_reason?: string
   verification_job_id?: string
   verified_at?: string
-  verification_evidence: Record<string, unknown>
+  verification_evidence: Record<string, string | number | boolean | null>
   source_finding: Finding
   created_by: string
   created_at: string
