@@ -25,6 +25,7 @@ from cryptohawk.services.worker import ScanWorker, WorkerConfig
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.policy import PolicyRepository
 from cryptohawk.storage.queue import ScanQueueRepository
 from cryptohawk.storage.quotas import QuotaRepository
 
@@ -172,10 +173,12 @@ def main() -> None:
         quota = QuotaRepository(inventory)
         queue = ScanQueueRepository(inventory, quota)
         continuous = ContinuousRepository(inventory)
+        policies = PolicyRepository(inventory)
         if settings.auto_create_schema:
             quota.create_schema()
             queue.create_schema()
             continuous.create_schema()
+            policies.create_schema()
         executor = AssetScanExecutor(
             risk_engine=engine,
             source_scanner=SourceScanner(),
@@ -186,6 +189,7 @@ def main() -> None:
                 allow_private_targets=settings.allow_private_targets
             ),
             ssh_scanner=SSHScanner(allow_private_targets=settings.allow_private_targets),
+            policy_provider=policies,
         )
         if args.command == "worker":
             runner = ScanWorker(
