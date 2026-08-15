@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -96,6 +96,13 @@ class RiskAssessment(BaseModel):
     migration_target: str | None = None
     migration_strategy: str | None = None
     security_bits: int | None = None
+    policy_id: str | None = None
+    policy_version: int | None = Field(default=None, ge=1)
+    policy_name: str | None = None
+    policy_status: Literal["pass", "review", "fail"] | None = None
+    policy_reasons: list[str] = Field(default_factory=list)
+    policy_controls: list[str] = Field(default_factory=list)
+    policy_rules_hash: str | None = None
 
 
 class Finding(BaseModel):
