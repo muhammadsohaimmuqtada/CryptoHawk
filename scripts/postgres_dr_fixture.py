@@ -12,6 +12,7 @@ from cryptohawk.domain.auth import PrincipalKind, WorkspaceRole
 from cryptohawk.domain.credentials import ConnectorCredentialKind
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanKind, ScanStatus
 from cryptohawk.domain.models import AssetType, CryptoObservation, Evidence, Primitive, ScanContext
+from cryptohawk.domain.remediation import RemediationStatus
 from cryptohawk.risk.engine import RiskEngine
 from cryptohawk.security.secrets import VersionedAesGcmCipher
 from cryptohawk.storage.audit import AuditRepository
@@ -22,6 +23,7 @@ from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.queue import ScanQueueRepository
 from cryptohawk.storage.quotas import QuotaRepository
+from cryptohawk.storage.remediation import RemediationRepository
 
 
 class DisasterRecoveryVerificationError(RuntimeError):
@@ -61,7 +63,8 @@ def _repositories():
     audit = AuditRepository(inventory)
     continuous = ContinuousRepository(inventory)
     credentials = ConnectorCredentialRepository(inventory, _cipher())
-    return inventory, findings, quota, queue, auth, audit, continuous, credentials
+    remediation = RemediationRepository(inventory)
+    return inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation
 
 
 def _write_manifest(path: Path, data: dict[str, object]) -> None:
@@ -72,7 +75,7 @@ def _write_manifest(path: Path, data: dict[str, object]) -> None:
 
 def seed(manifest_path: Path) -> None:
     _stage("repositories")
-    inventory, findings, quota, queue, auth, audit, continuous, credentials = _repositories()
+    inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation = _repositories()
 
     _stage("auth.bootstrap")
     issued = auth.bootstrap(
@@ -182,6 +185,20 @@ def seed(manifest_path: Path) -> None:
         findings_count=len(prepared),
     )
 
+    _stage("remediation.create")
+    migration_item = remediation.create_from_finding(
+        workspace_id=workspace.id,
+        finding_id=prepared[0].observation.id,
+        created_by=f"session:{owner.subject_id}",
+        owner="DR Platform Security",
+        notes="Representative post-quantum remediation work retained by backup/restore.",
+    )
+    migration_item = remediation.update_item(
+        workspace_id=workspace.id,
+        item_id=migration_item.id,
+        changes={"status": RemediationStatus.PLANNED.value},
+    )
+
     _stage("queue.enqueue")
     queued_job = queue.enqueue(
         workspace_id=workspace.id,
@@ -243,6 +260,8 @@ def seed(manifest_path: Path) -> None:
             "history_job_id": history_job.id,
             "queued_job_id": queued_job.id,
             "finding_id": prepared[0].observation.id,
+            "migration_item_id": migration_item.id,
+            "migration_fingerprint": migration_item.observation_fingerprint,
             "credential_id": credential.id,
             "credential_secret": connector_secret,
             "audit_event_id": audit_event.id,
@@ -260,7 +279,7 @@ def _expect(condition: bool, message: str) -> None:
 
 def verify(manifest_path: Path) -> None:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    inventory, findings, quota, queue, auth, audit, continuous, credentials = _repositories()
+    inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation = _repositories()
 
     workspace_id = str(data["workspace_id"])
     asset_id = str(data["asset_id"])
@@ -338,6 +357,27 @@ def verify(manifest_path: Path) -> None:
         active_only=True,
     )
     _expect(len(states) == 1, "cryptographic observation state was not restored")
+
+    _stage("verify.remediation")
+    migration_item = remediation.get_item(
+        workspace_id=workspace_id,
+        item_id=str(data["migration_item_id"]),
+    )
+    _expect(migration_item is not None, "migration work was not restored")
+    _expect(migration_item.status == RemediationStatus.PLANNED, "migration workflow state changed")
+    _expect(migration_item.owner == "DR Platform Security", "migration owner changed")
+    _expect(
+        migration_item.source_finding_id == str(data["finding_id"]),
+        "migration source evidence identity changed",
+    )
+    _expect(
+        migration_item.observation_fingerprint == str(data["migration_fingerprint"]),
+        "migration observation fingerprint changed",
+    )
+    _expect(
+        migration_item.source_finding.observation.family == "RSA",
+        "migration source evidence payload changed",
+    )
 
     _stage("verify.credential")
     material = credentials.resolve_for_use(
