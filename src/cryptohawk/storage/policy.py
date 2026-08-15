@@ -14,7 +14,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    func,
     select,
 )
 from sqlalchemy.exc import IntegrityError
@@ -46,7 +45,9 @@ class CryptoPolicyPackRecord(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+        String(64),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        index=True,
     )
     slug: Mapped[str] = mapped_column(String(80), index=True)
     name: Mapped[str] = mapped_column(String(200))
@@ -68,10 +69,14 @@ class CryptoPolicyVersionRecord(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     policy_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("crypto_policy_packs.id", ondelete="CASCADE"), index=True
+        String(64),
+        ForeignKey("crypto_policy_packs.id", ondelete="CASCADE"),
+        index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+        String(64),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        index=True,
     )
     version: Mapped[int] = mapped_column(Integer)
     rules_json: Mapped[str] = mapped_column(Text)
@@ -84,10 +89,14 @@ class WorkspacePolicyAssignmentRecord(Base):
     __tablename__ = "workspace_policy_assignments"
 
     workspace_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+        String(64),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
     )
     policy_version_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("crypto_policy_versions.id", ondelete="RESTRICT"), index=True
+        String(64),
+        ForeignKey("crypto_policy_versions.id", ondelete="RESTRICT"),
+        index=True,
     )
     assigned_by: Mapped[str] = mapped_column(String(200))
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -141,7 +150,10 @@ _BUILTIN_PACKS: tuple[tuple[str, str, str, CryptoPolicyRules], ...] = (
     (
         "long-lived-confidentiality",
         "Long-Lived Confidentiality",
-        "HNDL-focused baseline for data that must remain confidential through the PQ transition.",
+        (
+            "HNDL-focused baseline for data that must remain confidential through "
+            "the PQ transition."
+        ),
         CryptoPolicyRules(
             minimum_rsa_bits=3072,
             minimum_aes_bits=256,
@@ -165,7 +177,12 @@ class PolicyRepository:
     def create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def ensure_builtins(self, workspace_id: str, *, now: datetime | None = None) -> None:
+    def ensure_builtins(
+        self,
+        workspace_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> None:
         current = _utc(now)
         try:
             with self.SessionLocal() as session:
@@ -174,7 +191,10 @@ class PolicyRepository:
                 recommended_version_id: str | None = None
                 for slug, name, description, rules in _BUILTIN_PACKS:
                     policy_id = _stable_id(workspace_id, f"builtin-policy:{slug}")
-                    version_id = _stable_id(workspace_id, f"builtin-policy:{slug}:v1")
+                    version_id = _stable_id(
+                        workspace_id,
+                        f"builtin-policy:{slug}:v1",
+                    )
                     pack = session.get(CryptoPolicyPackRecord, policy_id)
                     if pack is None:
                         session.add(
@@ -206,7 +226,10 @@ class PolicyRepository:
                     if slug == "cryptohawk-recommended":
                         recommended_version_id = version_id
 
-                assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+                assignment = session.get(
+                    WorkspacePolicyAssignmentRecord,
+                    workspace_id,
+                )
                 if assignment is None:
                     if recommended_version_id is None:
                         raise RuntimeError("recommended policy definition is missing")
@@ -220,8 +243,8 @@ class PolicyRepository:
                     )
                 session.commit()
         except IntegrityError:
-            # Built-in identities are deterministic. A concurrent first-use insert may win;
-            # after rollback, validate that the complete built-in set and assignment exist.
+            # Deterministic built-in identities make a concurrent winner safe. Validate
+            # the complete result after rollback instead of creating duplicate policy rows.
             with self.SessionLocal() as session:
                 slugs = set(
                     session.scalars(
@@ -232,7 +255,10 @@ class PolicyRepository:
                     ).all()
                 )
                 expected = {definition[0] for definition in _BUILTIN_PACKS}
-                assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+                assignment = session.get(
+                    WorkspacePolicyAssignmentRecord,
+                    workspace_id,
+                )
                 if slugs != expected or assignment is None:
                     raise
 
@@ -251,7 +277,9 @@ class PolicyRepository:
         current = _utc(now)
         normalized_slug = slug.strip().lower()
         if not _SLUG_RE.fullmatch(normalized_slug):
-            raise ValueError("policy slug must contain lowercase letters, digits, and hyphens")
+            raise ValueError(
+                "policy slug must contain lowercase letters, digits, and hyphens"
+            )
         if not name.strip():
             raise ValueError("policy name is required")
         if not created_by.strip():
@@ -282,7 +310,10 @@ class PolicyRepository:
             )
             session.add_all([pack, version])
             if activate:
-                assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+                assignment = session.get(
+                    WorkspacePolicyAssignmentRecord,
+                    workspace_id,
+                )
                 if assignment is None:
                     session.add(
                         WorkspacePolicyAssignmentRecord(
@@ -319,56 +350,66 @@ class PolicyRepository:
         current = _utc(now)
         if not created_by.strip():
             raise ValueError("created_by is required")
-        with self.SessionLocal() as session:
-            pack = session.scalar(
-                select(CryptoPolicyPackRecord).where(
-                    CryptoPolicyPackRecord.id == policy_id,
-                    CryptoPolicyPackRecord.workspace_id == workspace_id,
-                )
-            )
-            if pack is None:
-                raise LookupError("policy pack not found in workspace")
-            if pack.built_in:
-                raise ValueError("built-in policy packs are immutable")
-            latest = session.scalar(
-                select(CryptoPolicyVersionRecord)
-                .where(CryptoPolicyVersionRecord.policy_id == policy_id)
-                .order_by(CryptoPolicyVersionRecord.version.desc())
-            )
-            version_number = (latest.version if latest else 0) + 1
-            rules_hash = _rules_hash(rules)
-            if latest is not None and latest.rules_hash == rules_hash:
-                raise ValueError("new policy version must change at least one rule")
-            record = CryptoPolicyVersionRecord(
-                id=str(uuid4()),
-                policy_id=policy_id,
-                workspace_id=workspace_id,
-                version=version_number,
-                rules_json=_rules_payload(rules),
-                rules_hash=rules_hash,
-                created_by=created_by.strip()[:200],
-                created_at=current,
-            )
-            session.add(record)
-            session.flush()
-            if activate:
-                assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
-                if assignment is None:
-                    session.add(
-                        WorkspacePolicyAssignmentRecord(
-                            workspace_id=workspace_id,
-                            policy_version_id=record.id,
-                            assigned_by=created_by.strip()[:200],
-                            assigned_at=current,
-                        )
+        try:
+            with self.SessionLocal() as session:
+                pack = session.scalar(
+                    select(CryptoPolicyPackRecord).where(
+                        CryptoPolicyPackRecord.id == policy_id,
+                        CryptoPolicyPackRecord.workspace_id == workspace_id,
                     )
-                else:
-                    assignment.policy_version_id = record.id
-                    assignment.assigned_by = created_by.strip()[:200]
-                    assignment.assigned_at = current
-            session.commit()
-            session.refresh(record)
-            return self._version(record)
+                )
+                if pack is None:
+                    raise LookupError("policy pack not found in workspace")
+                if pack.built_in:
+                    raise ValueError("built-in policy packs are immutable")
+                latest = session.scalar(
+                    select(CryptoPolicyVersionRecord)
+                    .where(CryptoPolicyVersionRecord.policy_id == policy_id)
+                    .order_by(CryptoPolicyVersionRecord.version.desc())
+                )
+                version_number = (latest.version if latest else 0) + 1
+                rules_hash = _rules_hash(rules)
+                if latest is not None and latest.rules_hash == rules_hash:
+                    raise ValueError(
+                        "new policy version must change at least one rule"
+                    )
+                record = CryptoPolicyVersionRecord(
+                    id=str(uuid4()),
+                    policy_id=policy_id,
+                    workspace_id=workspace_id,
+                    version=version_number,
+                    rules_json=_rules_payload(rules),
+                    rules_hash=rules_hash,
+                    created_by=created_by.strip()[:200],
+                    created_at=current,
+                )
+                session.add(record)
+                session.flush()
+                if activate:
+                    assignment = session.get(
+                        WorkspacePolicyAssignmentRecord,
+                        workspace_id,
+                    )
+                    if assignment is None:
+                        session.add(
+                            WorkspacePolicyAssignmentRecord(
+                                workspace_id=workspace_id,
+                                policy_version_id=record.id,
+                                assigned_by=created_by.strip()[:200],
+                                assigned_at=current,
+                            )
+                        )
+                    else:
+                        assignment.policy_version_id = record.id
+                        assignment.assigned_by = created_by.strip()[:200]
+                        assignment.assigned_at = current
+                session.commit()
+                session.refresh(record)
+                return self._version(record)
+        except IntegrityError as exc:
+            raise ValueError(
+                "policy version changed concurrently; reload the policy and retry"
+            ) from exc
 
     def activate(
         self,
@@ -393,7 +434,10 @@ class PolicyRepository:
             )
             if record is None:
                 raise LookupError("policy version not found in workspace")
-            assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+            assignment = session.get(
+                WorkspacePolicyAssignmentRecord,
+                workspace_id,
+            )
             if assignment is None:
                 assignment = WorkspacePolicyAssignmentRecord(
                     workspace_id=workspace_id,
@@ -412,15 +456,25 @@ class PolicyRepository:
     def effective_policy(self, workspace_id: str) -> EffectiveCryptoPolicy:
         self.ensure_builtins(workspace_id)
         with self.SessionLocal() as session:
-            assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+            assignment = session.get(
+                WorkspacePolicyAssignmentRecord,
+                workspace_id,
+            )
             if assignment is None:
                 raise RuntimeError("workspace has no effective cryptographic policy")
-            version = session.get(CryptoPolicyVersionRecord, assignment.policy_version_id)
+            version = session.get(
+                CryptoPolicyVersionRecord,
+                assignment.policy_version_id,
+            )
             if version is None:
-                raise RuntimeError("workspace policy assignment points to a missing version")
+                raise RuntimeError(
+                    "workspace policy assignment points to a missing version"
+                )
             pack = session.get(CryptoPolicyPackRecord, version.policy_id)
             if pack is None or pack.workspace_id != workspace_id:
-                raise RuntimeError("workspace policy assignment crosses tenant boundary")
+                raise RuntimeError(
+                    "workspace policy assignment crosses tenant boundary"
+                )
             return EffectiveCryptoPolicy(
                 pack=self._pack(pack),
                 version=self._version(version),
@@ -428,10 +482,17 @@ class PolicyRepository:
                 assigned_at=_utc(assignment.assigned_at),
             )
 
-    def list_packs(self, *, workspace_id: str) -> list[CryptoPolicyPackWithVersions]:
+    def list_packs(
+        self,
+        *,
+        workspace_id: str,
+    ) -> list[CryptoPolicyPackWithVersions]:
         self.ensure_builtins(workspace_id)
         with self.SessionLocal() as session:
-            assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+            assignment = session.get(
+                WorkspacePolicyAssignmentRecord,
+                workspace_id,
+            )
             active_id = assignment.policy_version_id if assignment else None
             packs = session.scalars(
                 select(CryptoPolicyPackRecord)
@@ -449,7 +510,11 @@ class PolicyRepository:
                     .order_by(CryptoPolicyVersionRecord.version.desc())
                 ).all()
                 active_version = next(
-                    (version.version for version in versions if version.id == active_id),
+                    (
+                        version.version
+                        for version in versions
+                        if version.id == active_id
+                    ),
                     None,
                 )
                 results.append(
@@ -482,10 +547,17 @@ class PolicyRepository:
                 .where(CryptoPolicyVersionRecord.policy_id == policy_id)
                 .order_by(CryptoPolicyVersionRecord.version.desc())
             ).all()
-            assignment = session.get(WorkspacePolicyAssignmentRecord, workspace_id)
+            assignment = session.get(
+                WorkspacePolicyAssignmentRecord,
+                workspace_id,
+            )
             active_id = assignment.policy_version_id if assignment else None
             active_version = next(
-                (version.version for version in versions if version.id == active_id),
+                (
+                    version.version
+                    for version in versions
+                    if version.id == active_id
+                ),
                 None,
             )
             return CryptoPolicyPackWithVersions(
