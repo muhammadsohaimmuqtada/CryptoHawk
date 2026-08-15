@@ -30,6 +30,10 @@ AnalystPrincipal = Annotated[
     Depends(require_workspace_role(WorkspaceRole.ANALYST)),
 ]
 
+StatusFilter = Annotated[RemediationStatus | None, Query(alias="status")]
+OwnerFilter = Annotated[str | None, Query(max_length=200)]
+LimitFilter = Annotated[int, Query(ge=1, le=1000)]
+
 remediation_repo = RemediationRepository(inventory)
 _schema_ready = False
 
@@ -98,9 +102,9 @@ def create_migration_item(
 def list_migration_items(
     workspace_id: str,
     _principal: ViewerPrincipal,
-    item_status: RemediationStatus | None = Query(default=None, alias="status"),
-    owner: str | None = Query(default=None, max_length=200),
-    limit: int = Query(default=500, ge=1, le=1000),
+    item_status: StatusFilter = None,
+    owner: OwnerFilter = None,
+    limit: LimitFilter = 500,
 ) -> list[MigrationItem]:
     return get_remediation_repository().list_items(
         workspace_id=workspace_id,
