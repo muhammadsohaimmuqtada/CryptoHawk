@@ -4,7 +4,9 @@ from typing import Protocol
 
 from cryptohawk.domain.inventory import ManagedAsset, ManagedAssetKind, ScanKind
 from cryptohawk.domain.models import CryptoObservation, Finding
+from cryptohawk.domain.policy import EffectiveCryptoPolicy
 from cryptohawk.risk.engine import RiskEngine
+from cryptohawk.risk.policy import CryptoPolicyEvaluator
 from cryptohawk.scanners.certificates import CertificateScanner
 from cryptohawk.scanners.container_image import (
     ContainerImageCollection,
@@ -15,6 +17,8 @@ from cryptohawk.scanners.repository import RepositoryCollection
 from cryptohawk.scanners.source import SourceScanner
 from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
+
+DEFAULT_POLICY_PROVENANCE = "risk-engine-v1"
 
 
 class AssetScanError(RuntimeError):
@@ -49,6 +53,10 @@ class RiskEngineProtocol(Protocol):
     def assess(self, observation: CryptoObservation, context) -> Finding: ...
 
 
+class PolicyProviderProtocol(Protocol):
+    def effective_policy(self, workspace_id: str) -> EffectiveCryptoPolicy: ...
+
+
 class AssetScanExecutor:
     def __init__(
         self,
@@ -60,6 +68,8 @@ class AssetScanExecutor:
         tls_scanner: EndpointScannerProtocol | None = None,
         certificate_scanner: EndpointScannerProtocol | None = None,
         ssh_scanner: EndpointScannerProtocol | None = None,
+        policy_provider: PolicyProviderProtocol | None = None,
+        policy_evaluator: CryptoPolicyEvaluator | None = None,
     ) -> None:
         self.risk_engine = risk_engine or RiskEngine()
         self.source_scanner = source_scanner or SourceScanner()
@@ -68,6 +78,8 @@ class AssetScanExecutor:
         self.tls_scanner = tls_scanner or TLSScanner()
         self.certificate_scanner = certificate_scanner or CertificateScanner()
         self.ssh_scanner = ssh_scanner or SSHScanner()
+        self.policy_provider = policy_provider
+        self.policy_evaluator = policy_evaluator or CryptoPolicyEvaluator()
 
     def execute(
         self,
@@ -78,8 +90,31 @@ class AssetScanExecutor:
         timeout: float = 5.0,
         scan_job_id: str | None = None,
     ) -> list[Finding]:
+        findings, _ = self.execute_with_provenance(
+            asset,
+            source=source,
+            filename=filename,
+            timeout=timeout,
+            scan_job_id=scan_job_id,
+        )
+        return findings
+
+    def execute_with_provenance(
+        self,
+        asset: ManagedAsset,
+        *,
+        source: str | None = None,
+        filename: str | None = None,
+        timeout: float = 5.0,
+        scan_job_id: str | None = None,
+    ) -> tuple[list[Finding], str]:
         if not asset.enabled:
             raise AssetScanError("asset is disabled")
+        policy = (
+            self.policy_provider.effective_policy(asset.workspace_id)
+            if self.policy_provider is not None
+            else None
+        )
         observations = self._collect(
             asset,
             source=source,
@@ -91,7 +126,16 @@ class AssetScanExecutor:
             observation.model_copy(update={"asset_id": asset.id, "asset_name": asset.name})
             for observation in observations
         ]
-        return [self.risk_engine.assess(observation, asset.context) for observation in normalized]
+        findings = [
+            self.risk_engine.assess(observation, asset.context) for observation in normalized
+        ]
+        if policy is not None:
+            findings = [
+                self.policy_evaluator.apply(finding, asset.context, policy)
+                for finding in findings
+            ]
+            return findings, policy.provenance_ref
+        return findings, DEFAULT_POLICY_PROVENANCE
 
     @staticmethod
     def scan_kind(asset: ManagedAsset) -> ScanKind:
