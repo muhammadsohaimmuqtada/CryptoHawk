@@ -2,6 +2,8 @@ import type {
   Finding,
   IssuedToken,
   ManagedAsset,
+  MigrationItem,
+  RemediationVerification,
   ScanJob,
   Summary,
   Workspace,
@@ -67,6 +69,26 @@ export function createClient(token: string, onUnauthorized: () => void) {
       json<ManagedAsset[]>(`/api/v1/workspaces/${workspaceId}/assets`),
     jobs: (workspaceId: string) =>
       json<ScanJob[]>(`/api/v1/workspaces/${workspaceId}/scan-jobs?limit=100`),
+    migrationItems: (workspaceId: string) =>
+      json<MigrationItem[]>(`/api/v1/workspaces/${workspaceId}/migration-items?limit=500`),
+    createMigrationItem: (workspaceId: string, body: Record<string, unknown>) =>
+      json<MigrationItem>(
+        `/api/v1/workspaces/${workspaceId}/migration-items`,
+        { method: 'POST', body: JSON.stringify(body) },
+        'Unable to create migration work',
+      ),
+    updateMigrationItem: (workspaceId: string, itemId: string, body: Record<string, unknown>) =>
+      json<MigrationItem>(
+        `/api/v1/workspaces/${workspaceId}/migration-items/${itemId}/update`,
+        { method: 'POST', body: JSON.stringify(body) },
+        'Unable to update migration work',
+      ),
+    verifyMigrationItem: (workspaceId: string, itemId: string, verificationJobId: string) =>
+      json<RemediationVerification>(
+        `/api/v1/workspaces/${workspaceId}/migration-items/${itemId}/verify`,
+        { method: 'POST', body: JSON.stringify({ verification_job_id: verificationJobId }) },
+        'Unable to verify migration work',
+      ),
     createAsset: (workspaceId: string, body: Record<string, unknown>) =>
       json<ManagedAsset>(
         `/api/v1/workspaces/${workspaceId}/assets`,
