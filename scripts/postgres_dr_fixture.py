@@ -12,8 +12,10 @@ from cryptohawk.domain.auth import PrincipalKind, WorkspaceRole
 from cryptohawk.domain.credentials import ConnectorCredentialKind
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanKind, ScanStatus
 from cryptohawk.domain.models import AssetType, CryptoObservation, Evidence, Primitive, ScanContext
+from cryptohawk.domain.policy import CryptoPolicyRules
 from cryptohawk.domain.remediation import RemediationStatus
 from cryptohawk.risk.engine import RiskEngine
+from cryptohawk.risk.policy import CryptoPolicyEvaluator
 from cryptohawk.security.secrets import VersionedAesGcmCipher
 from cryptohawk.storage.audit import AuditRepository
 from cryptohawk.storage.auth import AuthRepository
@@ -21,6 +23,7 @@ from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.credentials import ConnectorCredentialRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.policy import PolicyRepository
 from cryptohawk.storage.queue import ScanQueueRepository
 from cryptohawk.storage.quotas import QuotaRepository
 from cryptohawk.storage.remediation import RemediationRepository
@@ -64,7 +67,19 @@ def _repositories():
     continuous = ContinuousRepository(inventory)
     credentials = ConnectorCredentialRepository(inventory, _cipher())
     remediation = RemediationRepository(inventory)
-    return inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation
+    policies = PolicyRepository(inventory)
+    return (
+        inventory,
+        findings,
+        quota,
+        queue,
+        auth,
+        audit,
+        continuous,
+        credentials,
+        remediation,
+        policies,
+    )
 
 
 def _write_manifest(path: Path, data: dict[str, object]) -> None:
@@ -85,6 +100,7 @@ def seed(manifest_path: Path) -> None:
         continuous,
         credentials,
         remediation,
+        policies,
     ) = _repositories()
 
     _stage("auth.bootstrap")
@@ -114,6 +130,29 @@ def seed(manifest_path: Path) -> None:
         role=WorkspaceRole.ANALYST,
         expires_days=30,
     )
+
+    _stage("policy.create")
+    policy_pack = policies.create_pack(
+        workspace_id=workspace.id,
+        slug="dr-production-baseline",
+        name="DR Production Baseline",
+        description="Representative organization baseline retained through backup and restore.",
+        rules=CryptoPolicyRules(
+            minimum_rsa_bits=3072,
+            minimum_aes_bits=256,
+            minimum_tls_version="1.3",
+            quantum_vulnerable_default="fail",
+            internet_exposed_quantum_action="fail",
+            long_lived_data_years=3,
+            unknown_family_action="review",
+            minimum_detection_confidence=0.85,
+        ),
+        created_by=f"session:{owner.subject_id}",
+        activate=True,
+    )
+    policy = policies.effective_policy(workspace.id)
+    if policy.pack.id != policy_pack.pack.id:
+        raise DisasterRecoveryVerificationError("custom DR policy was not activated")
 
     _stage("inventory.asset")
     asset = inventory.create_asset(
@@ -167,7 +206,8 @@ def seed(manifest_path: Path) -> None:
             metadata={"fixture": True},
         ),
     )
-    finding = RiskEngine().assess(observation, asset.context)
+    base_finding = RiskEngine().assess(observation, asset.context)
+    finding = CryptoPolicyEvaluator().apply(base_finding, asset.context, policy)
 
     _stage("continuous.prepare-findings")
     prepared = continuous.prepare_findings(history_job.id, [finding])
@@ -186,6 +226,7 @@ def seed(manifest_path: Path) -> None:
         asset_id=asset.id,
         scan_job_id=history_job.id,
         findings=prepared,
+        policy_version=policy.provenance_ref,
     )
     inventory.transition_scan_job(
         workspace_id=workspace.id,
@@ -272,6 +313,10 @@ def seed(manifest_path: Path) -> None:
             "finding_id": prepared[0].observation.id,
             "migration_item_id": migration_item.id,
             "migration_fingerprint": migration_item.observation_fingerprint,
+            "policy_id": policy.pack.id,
+            "policy_version": policy.version.version,
+            "policy_rules_hash": policy.version.rules_hash,
+            "policy_provenance": policy.provenance_ref,
             "credential_id": credential.id,
             "credential_secret": connector_secret,
             "audit_event_id": audit_event.id,
@@ -299,6 +344,7 @@ def verify(manifest_path: Path) -> None:
         continuous,
         credentials,
         remediation,
+        policies,
     ) = _repositories()
 
     workspace_id = str(data["workspace_id"])
@@ -321,6 +367,22 @@ def verify(manifest_path: Path) -> None:
     api_principal = auth.authenticate(str(data["api_key_token"]))
     _expect(api_principal.kind == PrincipalKind.API_KEY, "API key authentication failed")
     auth.authorize_workspace(api_principal, workspace_id, WorkspaceRole.ANALYST)
+
+    _stage("verify.policy")
+    effective_policy = policies.effective_policy(workspace_id)
+    _expect(effective_policy.pack.id == str(data["policy_id"]), "active policy changed")
+    _expect(
+        effective_policy.version.version == int(data["policy_version"]),
+        "active policy version changed",
+    )
+    _expect(
+        effective_policy.version.rules_hash == str(data["policy_rules_hash"]),
+        "policy rules hash changed",
+    )
+    _expect(
+        effective_policy.provenance_ref == str(data["policy_provenance"]),
+        "effective policy provenance changed",
+    )
 
     _stage("verify.asset")
     asset = inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id)
@@ -366,11 +428,24 @@ def verify(manifest_path: Path) -> None:
         "restored finding identity changed",
     )
     _expect(restored_finding.observation.family == "RSA", "restored finding payload changed")
+    _expect(restored_finding.risk.policy_status == "fail", "policy result changed")
+    _expect(
+        restored_finding.risk.policy_id == str(data["policy_id"]),
+        "finding policy identity changed",
+    )
+    _expect(
+        restored_finding.risk.policy_rules_hash == str(data["policy_rules_hash"]),
+        "finding policy rules hash changed",
+    )
 
     _stage("verify.history")
     history = continuous.list_scan_history(workspace_id=workspace_id, asset_id=asset_id)
     _expect(len(history) == 1, "scan history was not restored")
     _expect(history[0].job_id == history_job_id, "scan history job identity changed")
+    _expect(
+        history[0].policy_version == str(data["policy_provenance"]),
+        "scan history policy provenance changed",
+    )
     states = continuous.list_observation_states(
         workspace_id=workspace_id,
         asset_id=asset_id,
@@ -397,6 +472,11 @@ def verify(manifest_path: Path) -> None:
     _expect(
         migration_item.source_finding.observation.family == "RSA",
         "migration source evidence payload changed",
+    )
+    _expect(
+        migration_item.source_finding.risk.policy_rules_hash
+        == str(data["policy_rules_hash"]),
+        "migration source policy evidence changed",
     )
 
     _stage("verify.credential")
