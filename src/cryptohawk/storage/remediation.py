@@ -8,6 +8,7 @@ from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstrain
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
+from cryptohawk.domain.inventory import ScanStatus
 from cryptohawk.domain.models import Finding, Severity
 from cryptohawk.domain.remediation import (
     MigrationItem,
@@ -15,10 +16,9 @@ from cryptohawk.domain.remediation import (
     RemediationStatus,
     RemediationVerification,
 )
-from cryptohawk.domain.inventory import ScanStatus
 from cryptohawk.storage.continuous import ObservationOccurrenceRecord, ScanSnapshotRecord
 from cryptohawk.storage.database import Base, FindingRecord, FindingScopeRecord
-from cryptohawk.storage.inventory import InventoryRepository, ManagedAssetRecord, ScanJobRecord
+from cryptohawk.storage.inventory import InventoryRepository, ScanJobRecord
 from cryptohawk.storage.time import as_utc
 
 
@@ -66,7 +66,11 @@ class MigrationItemRecord(Base):
 
 _ALLOWED_TRANSITIONS: dict[RemediationStatus, frozenset[RemediationStatus]] = {
     RemediationStatus.OPEN: frozenset(
-        {RemediationStatus.PLANNED, RemediationStatus.IN_PROGRESS, RemediationStatus.ACCEPTED_RISK}
+        {
+            RemediationStatus.PLANNED,
+            RemediationStatus.IN_PROGRESS,
+            RemediationStatus.ACCEPTED_RISK,
+        }
     ),
     RemediationStatus.PLANNED: frozenset(
         {
@@ -89,7 +93,9 @@ _ALLOWED_TRANSITIONS: dict[RemediationStatus, frozenset[RemediationStatus]] = {
         {RemediationStatus.IN_PROGRESS, RemediationStatus.BLOCKED}
     ),
     RemediationStatus.VERIFIED: frozenset({RemediationStatus.OPEN}),
-    RemediationStatus.ACCEPTED_RISK: frozenset({RemediationStatus.OPEN, RemediationStatus.PLANNED}),
+    RemediationStatus.ACCEPTED_RISK: frozenset(
+        {RemediationStatus.OPEN, RemediationStatus.PLANNED}
+    ),
 }
 
 
@@ -129,6 +135,8 @@ class RemediationRepository:
         notes: str | None = None,
         now: datetime | None = None,
     ) -> MigrationItem:
+        if not created_by.strip():
+            raise ValueError("created_by is required")
         current = _now(now)
         with self.SessionLocal() as session:
             row = session.execute(
@@ -153,11 +161,17 @@ class RemediationRepository:
             )
             if occurrence is None:
                 raise ValueError(
-                    "finding has no continuous provenance; rescan the managed asset before creating migration work"
+                    "finding has no continuous provenance; rescan the managed asset "
+                    "before creating migration work"
                 )
+
             finding = Finding.model_validate_json(finding_record.payload)
             selected_priority = priority or _priority_from_severity(finding.risk.severity)
             selected_target = target_algorithm or finding.risk.migration_target
+            title = (
+                f"Migrate {finding.observation.algorithm} on "
+                f"{finding.observation.asset_name}"
+            )[:300]
             record = MigrationItemRecord(
                 id=str(uuid4()),
                 workspace_id=workspace_id,
@@ -165,7 +179,7 @@ class RemediationRepository:
                 observation_fingerprint=occurrence.fingerprint,
                 source_finding_id=finding_id,
                 source_scan_job_id=occurrence.job_id,
-                title=f"Migrate {finding.observation.algorithm} on {finding.observation.asset_name}"[:300],
+                title=title,
                 owner=owner.strip()[:200] if owner and owner.strip() else None,
                 status=RemediationStatus.OPEN.value,
                 priority=selected_priority.value,
@@ -177,7 +191,7 @@ class RemediationRepository:
                 verified_at=None,
                 verification_evidence_json="{}",
                 source_finding_json=finding.model_dump_json(),
-                created_by=created_by[:200],
+                created_by=created_by.strip()[:200],
                 created_at=current,
                 updated_at=current,
             )
@@ -186,7 +200,9 @@ class RemediationRepository:
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()
-                raise ValueError("migration work already exists for this cryptographic exposure") from exc
+                raise ValueError(
+                    "migration work already exists for this cryptographic exposure"
+                ) from exc
             session.refresh(record)
             return self._item(record)
 
@@ -236,10 +252,19 @@ class RemediationRepository:
         now: datetime | None = None,
     ) -> MigrationItem:
         current = _now(now)
-        allowed = {"owner", "status", "priority", "target_algorithm", "due_date", "notes", "acceptance_reason"}
+        allowed = {
+            "owner",
+            "status",
+            "priority",
+            "target_algorithm",
+            "due_date",
+            "notes",
+            "acceptance_reason",
+        }
         unknown = set(changes) - allowed
         if unknown:
             raise ValueError(f"unsupported remediation fields: {', '.join(sorted(unknown))}")
+
         with self.SessionLocal() as session:
             row = session.scalar(
                 select(MigrationItemRecord).where(
@@ -253,20 +278,27 @@ class RemediationRepository:
             if "status" in changes and changes["status"] is not None:
                 target = RemediationStatus(str(changes["status"]))
                 current_status = RemediationStatus(row.status)
-                if target != current_status and target not in _ALLOWED_TRANSITIONS[current_status]:
-                    raise ValueError(f"invalid remediation transition: {current_status.value} -> {target.value}")
+                if (
+                    target != current_status
+                    and target not in _ALLOWED_TRANSITIONS[current_status]
+                ):
+                    raise ValueError(
+                        "invalid remediation transition: "
+                        f"{current_status.value} -> {target.value}"
+                    )
                 if target == RemediationStatus.VERIFIED:
-                    raise ValueError("verified status can only be reached through rescan verification")
+                    raise ValueError(
+                        "verified status can only be reached through rescan verification"
+                    )
                 row.status = target.value
                 if target == RemediationStatus.ACCEPTED_RISK:
                     reason = changes.get("acceptance_reason", row.acceptance_reason)
                     if not isinstance(reason, str) or len(reason.strip()) < 5:
                         raise ValueError("accepted risk requires an acceptance reason")
                     row.acceptance_reason = reason.strip()
-                elif target != RemediationStatus.ACCEPTED_RISK:
+                else:
                     row.acceptance_reason = None
-                if target != RemediationStatus.VERIFIED:
-                    row.verified_at = None
+                row.verified_at = None
 
             if "owner" in changes:
                 value = changes["owner"]
@@ -284,7 +316,10 @@ class RemediationRepository:
             if "notes" in changes:
                 value = changes["notes"]
                 row.notes = str(value).strip() if value else None
-            if "acceptance_reason" in changes and row.status == RemediationStatus.ACCEPTED_RISK.value:
+            if (
+                "acceptance_reason" in changes
+                and row.status == RemediationStatus.ACCEPTED_RISK.value
+            ):
                 value = changes["acceptance_reason"]
                 if not isinstance(value, str) or len(value.strip()) < 5:
                     raise ValueError("accepted risk requires an acceptance reason")
@@ -325,7 +360,9 @@ class RemediationRepository:
                 )
             )
             if job is None:
-                raise ValueError("verification requires a successful scan of the same managed asset")
+                raise ValueError(
+                    "verification requires a successful scan of the same managed asset"
+                )
 
             snapshot = session.get(ScanSnapshotRecord, verification_job_id)
             if snapshot is None:
@@ -336,18 +373,27 @@ class RemediationRepository:
                     ScanSnapshotRecord.workspace_id == workspace_id,
                     ScanSnapshotRecord.asset_id == row.asset_id,
                 )
-                .order_by(ScanSnapshotRecord.completed_at.desc(), ScanSnapshotRecord.job_id.desc())
+                .order_by(
+                    ScanSnapshotRecord.completed_at.desc(),
+                    ScanSnapshotRecord.job_id.desc(),
+                )
             )
             if latest_snapshot is None or latest_snapshot.job_id != verification_job_id:
-                raise ValueError("verification must use the latest successful evidence snapshot")
+                raise ValueError(
+                    "verification must use the latest successful evidence snapshot"
+                )
             source_snapshot = session.get(ScanSnapshotRecord, row.source_scan_job_id)
-            if source_snapshot is not None and snapshot.completed_at <= source_snapshot.completed_at:
+            if (
+                source_snapshot is not None
+                and snapshot.completed_at <= source_snapshot.completed_at
+            ):
                 raise ValueError("verification scan must be newer than the source finding")
 
             occurrence = session.scalar(
                 select(ObservationOccurrenceRecord).where(
                     ObservationOccurrenceRecord.job_id == verification_job_id,
-                    ObservationOccurrenceRecord.fingerprint == row.observation_fingerprint,
+                    ObservationOccurrenceRecord.fingerprint
+                    == row.observation_fingerprint,
                 )
             )
             resolved = occurrence is None
