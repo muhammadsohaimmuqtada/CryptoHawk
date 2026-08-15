@@ -1,4 +1,7 @@
 import type {
+  CryptoPolicyPackWithVersions,
+  CryptoPolicyVersion,
+  EffectiveCryptoPolicy,
   Finding,
   IssuedToken,
   ManagedAsset,
@@ -88,6 +91,36 @@ export function createClient(token: string, onUnauthorized: () => void) {
         `/api/v1/workspaces/${workspaceId}/migration-items/${itemId}/verify`,
         { method: 'POST', body: JSON.stringify({ verification_job_id: verificationJobId }) },
         'Unable to verify migration work',
+      ),
+    policyPacks: (workspaceId: string) =>
+      json<CryptoPolicyPackWithVersions[]>(
+        `/api/v1/workspaces/${workspaceId}/policy-packs`,
+      ),
+    effectivePolicy: (workspaceId: string) =>
+      json<EffectiveCryptoPolicy>(
+        `/api/v1/workspaces/${workspaceId}/policy-packs/effective`,
+      ),
+    createPolicyPack: (workspaceId: string, body: Record<string, unknown>) =>
+      json<CryptoPolicyPackWithVersions>(
+        `/api/v1/workspaces/${workspaceId}/policy-packs`,
+        { method: 'POST', body: JSON.stringify(body) },
+        'Unable to create policy pack',
+      ),
+    createPolicyVersion: (
+      workspaceId: string,
+      policyId: string,
+      body: Record<string, unknown>,
+    ) =>
+      json<CryptoPolicyVersion>(
+        `/api/v1/workspaces/${workspaceId}/policy-packs/${policyId}/versions`,
+        { method: 'POST', body: JSON.stringify(body) },
+        'Unable to create policy version',
+      ),
+    activatePolicyVersion: (workspaceId: string, policyId: string, version: number) =>
+      json<EffectiveCryptoPolicy>(
+        `/api/v1/workspaces/${workspaceId}/policy-packs/${policyId}/versions/${version}/activate`,
+        { method: 'POST' },
+        'Unable to activate policy version',
       ),
     createAsset: (workspaceId: string, body: Record<string, unknown>) =>
       json<ManagedAsset>(
