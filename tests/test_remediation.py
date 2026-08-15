@@ -40,9 +40,14 @@ def _finding(asset_id: str, *, score: int = 78) -> Finding:
             score=score,
             severity=Severity.HIGH,
             quantum_status=QuantumStatus.VULNERABLE,
-            reasons=["RSA public-key cryptography is vulnerable to a cryptographically relevant quantum computer."],
+            reasons=[
+                "RSA public-key cryptography is vulnerable to a cryptographically relevant "
+                "quantum computer."
+            ],
             migration_target="ML-KEM hybrid deployment",
-            migration_strategy="Introduce hybrid key establishment before retiring RSA-only exchange.",
+            migration_strategy=(
+                "Introduce hybrid key establishment before retiring RSA-only exchange."
+            ),
         ),
     )
 
@@ -63,7 +68,11 @@ def _repositories(tmp_path: Path):
         name="Payments API",
         kind=ManagedAssetKind.TLS_ENDPOINT,
         locator="payments.example.com:443",
-        context=ScanContext(internet_exposed=True, asset_criticality=9, data_lifetime_years=8),
+        context=ScanContext(
+            internet_exposed=True,
+            asset_criticality=9,
+            data_lifetime_years=8,
+        ),
     )
     return inventory, findings, continuous, remediation, workspace, asset
 
@@ -114,7 +123,9 @@ def _successful_scan(
 
 
 def test_migration_item_uses_stable_observation_identity(tmp_path: Path) -> None:
-    inventory, findings, continuous, remediation, workspace, asset = _repositories(tmp_path)
+    inventory, findings, continuous, remediation, workspace, asset = _repositories(
+        tmp_path
+    )
     job, prepared = _successful_scan(
         inventory,
         findings,
@@ -147,8 +158,12 @@ def test_migration_item_uses_stable_observation_identity(tmp_path: Path) -> None
         )
 
 
-def test_workflow_rejects_manual_verified_state_and_requires_risk_reason(tmp_path: Path) -> None:
-    inventory, findings, continuous, remediation, workspace, asset = _repositories(tmp_path)
+def test_workflow_rejects_manual_verified_state_and_requires_risk_reason(
+    tmp_path: Path,
+) -> None:
+    inventory, findings, continuous, remediation, workspace, asset = _repositories(
+        tmp_path
+    )
     _, prepared = _successful_scan(
         inventory,
         findings,
@@ -183,15 +198,21 @@ def test_workflow_rejects_manual_verified_state_and_requires_risk_reason(tmp_pat
         item_id=item.id,
         changes={
             "status": RemediationStatus.ACCEPTED_RISK.value,
-            "acceptance_reason": "Compensating control approved through the 2026 migration window.",
+            "acceptance_reason": (
+                "Compensating control approved through the 2026 migration window."
+            ),
         },
     )
     assert accepted.status == RemediationStatus.ACCEPTED_RISK
     assert accepted.acceptance_reason
 
 
-def test_rescan_verification_reopens_when_present_and_verifies_when_resolved(tmp_path: Path) -> None:
-    inventory, findings, continuous, remediation, workspace, asset = _repositories(tmp_path)
+def test_rescan_verification_reopens_when_present_and_verifies_when_resolved(
+    tmp_path: Path,
+) -> None:
+    inventory, findings, continuous, remediation, workspace, asset = _repositories(
+        tmp_path
+    )
     _, source_findings = _successful_scan(
         inventory,
         findings,
@@ -261,4 +282,7 @@ def test_rescan_verification_reopens_when_present_and_verifies_when_resolved(tmp
     assert resolved.outcome == "resolved"
     assert resolved.item.status == RemediationStatus.VERIFIED
     assert resolved.item.verified_at is not None
-    assert resolved.item.verification_evidence["observation_fingerprint"] == item.observation_fingerprint
+    assert (
+        resolved.item.verification_evidence["observation_fingerprint"]
+        == item.observation_fingerprint
+    )
