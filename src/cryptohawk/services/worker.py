@@ -16,7 +16,11 @@ from cryptohawk.observability import (
     record_scan_attempt,
     traced_operation,
 )
-from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
+from cryptohawk.services.executor import (
+    DEFAULT_POLICY_PROVENANCE,
+    AssetScanError,
+    AssetScanExecutor,
+)
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
@@ -114,11 +118,19 @@ class ScanWorker:
                 if self._heartbeat_or_cancel(job.id):
                     outcome = "canceled"
                     return True
-                results = self.executor.execute(
-                    asset,
-                    timeout=self.config.scan_timeout,
-                    scan_job_id=job.id,
-                )
+                if hasattr(self.executor, "execute_with_provenance"):
+                    results, policy_version = self.executor.execute_with_provenance(
+                        asset,
+                        timeout=self.config.scan_timeout,
+                        scan_job_id=job.id,
+                    )
+                else:
+                    results = self.executor.execute(
+                        asset,
+                        timeout=self.config.scan_timeout,
+                        scan_job_id=job.id,
+                    )
+                    policy_version = DEFAULT_POLICY_PROVENANCE
                 if self.history is not None:
                     results = self.history.prepare_findings(job.id, results)
 
@@ -142,6 +154,7 @@ class ScanWorker:
                         asset_id=asset.id,
                         scan_job_id=job.id,
                         findings=results,
+                        policy_version=policy_version,
                     )
                 self.queue.complete(
                     job_id=job.id,
@@ -150,6 +163,7 @@ class ScanWorker:
                 )
                 outcome = "succeeded"
                 span.set_attribute("cryptohawk.scan.findings_count", len(results))
+                span.set_attribute("cryptohawk.scan.policy_version", policy_version)
                 return True
             except Exception as exc:
                 retryable = (
