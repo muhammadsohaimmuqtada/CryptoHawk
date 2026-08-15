@@ -75,7 +75,17 @@ def _write_manifest(path: Path, data: dict[str, object]) -> None:
 
 def seed(manifest_path: Path) -> None:
     _stage("repositories")
-    inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation = _repositories()
+    (
+        inventory,
+        findings,
+        quota,
+        queue,
+        auth,
+        audit,
+        continuous,
+        credentials,
+        remediation,
+    ) = _repositories()
 
     _stage("auth.bootstrap")
     issued = auth.bootstrap(
@@ -279,7 +289,17 @@ def _expect(condition: bool, message: str) -> None:
 
 def verify(manifest_path: Path) -> None:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    inventory, findings, quota, queue, auth, audit, continuous, credentials, remediation = _repositories()
+    (
+        inventory,
+        findings,
+        quota,
+        queue,
+        auth,
+        audit,
+        continuous,
+        credentials,
+        remediation,
+    ) = _repositories()
 
     workspace_id = str(data["workspace_id"])
     asset_id = str(data["asset_id"])
