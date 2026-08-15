@@ -185,7 +185,10 @@ def test_viewer_can_read_policy_but_cannot_mutate_or_cross_workspace(
     assert member.status_code == 201
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "viewer@example.com", "password": "viewer-secure-password"},
+        json={
+            "email": "viewer@example.com",
+            "password": "viewer-secure-password",
+        },
     )
     viewer_token = login.json()["token"]
 
@@ -207,7 +210,10 @@ def test_viewer_can_read_policy_but_cannot_mutate_or_cross_workspace(
     assert denied.status_code == 403
 
     owner_principal = auth.authenticate(owner_token)
-    other_workspace = auth.create_workspace(principal=owner_principal, name="Other")
+    other_workspace = auth.create_workspace(
+        principal=owner_principal,
+        name="Other",
+    )
     outside = client.get(
         f"/api/v1/workspaces/{other_workspace.id}/policy-packs",
         headers=_bearer(viewer_token),
@@ -215,7 +221,10 @@ def test_viewer_can_read_policy_but_cannot_mutate_or_cross_workspace(
     assert outside.status_code == 403
 
 
-def test_builtin_policy_is_immutable_through_api(tmp_path: Path, monkeypatch) -> None:
+def test_builtin_policy_is_immutable_through_api(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     client, _, _, _, _ = _client(tmp_path, monkeypatch)
     owner_token, workspace_id = _bootstrap(client)
     builtins = client.get(
@@ -223,7 +232,9 @@ def test_builtin_policy_is_immutable_through_api(tmp_path: Path, monkeypatch) ->
         headers=_bearer(owner_token),
     ).json()
     recommended = next(
-        item for item in builtins if item["pack"]["slug"] == "cryptohawk-recommended"
+        item
+        for item in builtins
+        if item["pack"]["slug"] == "cryptohawk-recommended"
     )
 
     response = client.post(
@@ -247,7 +258,11 @@ def test_managed_scan_records_exact_active_policy_in_finding_and_history(
         f"/api/v1/workspaces/{workspace_id}/policy-packs",
         headers=_bearer(owner_token),
     ).json()
-    strict = next(item for item in policies if item["pack"]["slug"] == "strict-modern")
+    strict = next(
+        item
+        for item in policies
+        if item["pack"]["slug"] == "strict-modern"
+    )
     activated = client.post(
         f"/api/v1/workspaces/{workspace_id}/policy-packs/"
         f"{strict['pack']['id']}/versions/1/activate",
@@ -287,7 +302,11 @@ def test_managed_scan_records_exact_active_policy_in_finding_and_history(
     )
     assert scanned.status_code == 200
     findings = scanned.json()["findings"]
-    rsa_finding = next(item for item in findings if item["observation"]["family"] == "RSA")
+    rsa_finding = next(
+        item
+        for item in findings
+        if item["observation"]["family"] == "RSA"
+    )
     assert rsa_finding["risk"]["policy_status"] == "fail"
     assert rsa_finding["risk"]["policy_id"] == effective["pack"]["id"]
     assert rsa_finding["risk"]["policy_version"] == 1
@@ -296,11 +315,18 @@ def test_managed_scan_records_exact_active_policy_in_finding_and_history(
         == effective["version"]["rules_hash"]
     )
 
-    history = continuous.list_scan_history(workspace_id=workspace_id, asset_id=asset_id)
+    history = continuous.list_scan_history(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+    )
     assert len(history) == 1
     expected_ref = (
         f"policy:{effective['pack']['id']}@1:"
         f"{effective['version']['rules_hash'][:16]}"
     )
     assert history[0].policy_version == expected_ref
-    assert inventory.get_asset(workspace_id=workspace_id, asset_id=asset_id) is not None
+    restored_asset = inventory.get_asset(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+    )
+    assert restored_asset is not None
