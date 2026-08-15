@@ -143,7 +143,8 @@ def test_owner_can_select_builtin_and_create_versioned_custom_policy(
     assert custom["versions"][0]["version"] == 1
 
     version_two = client.post(
-        f"/api/v1/workspaces/{workspace_id}/policy-packs/{custom['pack']['id']}/versions",
+        f"/api/v1/workspaces/{workspace_id}/policy-packs/"
+        f"{custom['pack']['id']}/versions",
         headers=_bearer(owner_token),
         json={
             "activate": True,
@@ -290,11 +291,13 @@ def test_managed_scan_records_exact_active_policy_in_finding_and_history(
     assert rsa_finding["risk"]["policy_status"] == "fail"
     assert rsa_finding["risk"]["policy_id"] == effective["pack"]["id"]
     assert rsa_finding["risk"]["policy_version"] == 1
-    assert rsa_finding["risk"]["policy_rules_hash"] == effective["version"]["rules_hash"]
+    assert (
+        rsa_finding["risk"]["policy_rules_hash"]
+        == effective["version"]["rules_hash"]
+    )
 
     history = continuous.list_scan_history(workspace_id=workspace_id, asset_id=asset_id)
     assert len(history) == 1
-    assert history[0].policy_version == effective["version"]["provenance_ref"] if False else True
     expected_ref = (
         f"policy:{effective['pack']['id']}@1:"
         f"{effective['version']['rules_hash'][:16]}"
