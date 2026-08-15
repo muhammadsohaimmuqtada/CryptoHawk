@@ -13,6 +13,7 @@ from cryptohawk.scanners.ssh import SSHScanner
 from cryptohawk.scanners.tls import TLSScanner
 from cryptohawk.services.container_runtime import build_container_scanner
 from cryptohawk.services.executor import (
+    DEFAULT_POLICY_PROVENANCE,
     AssetScanError,
     AssetScanExecutor,
     ContainerScannerProtocol,
@@ -24,6 +25,7 @@ from cryptohawk.services.executor import (
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
+from cryptohawk.storage.policy import PolicyRepository
 from cryptohawk.storage.quotas import QuotaRepository
 
 
@@ -43,11 +45,13 @@ class ScanJobService:
         ssh_scanner: EndpointScannerProtocol | None = None,
         quota: QuotaRepository | None = None,
         history: ContinuousRepository | None = None,
+        policy_repository: PolicyRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.findings = findings
         self.quota = quota
         self.history = history or ContinuousRepository(inventory)
+        self.policy_repository = policy_repository or PolicyRepository(inventory)
         if repository_scanner is None:
             from cryptohawk.services.repository_runtime import build_repository_scanner
 
@@ -63,6 +67,7 @@ class ScanJobService:
             or CertificateScanner(allow_private_targets=settings.allow_private_targets),
             ssh_scanner=ssh_scanner
             or SSHScanner(allow_private_targets=settings.allow_private_targets),
+            policy_provider=self.policy_repository,
         )
 
     def run(
@@ -110,13 +115,23 @@ class ScanJobService:
                 component="api",
             ) as span:
                 try:
-                    results = self.executor.execute(
-                        asset,
-                        source=source,
-                        filename=filename,
-                        timeout=timeout,
-                        scan_job_id=job.id,
-                    )
+                    if hasattr(self.executor, "execute_with_provenance"):
+                        results, policy_version = self.executor.execute_with_provenance(
+                            asset,
+                            source=source,
+                            filename=filename,
+                            timeout=timeout,
+                            scan_job_id=job.id,
+                        )
+                    else:
+                        results = self.executor.execute(
+                            asset,
+                            source=source,
+                            filename=filename,
+                            timeout=timeout,
+                            scan_job_id=job.id,
+                        )
+                        policy_version = DEFAULT_POLICY_PROVENANCE
                     results = self.history.prepare_findings(job.id, results)
                     self.findings.upsert_many(
                         results,
@@ -129,6 +144,7 @@ class ScanJobService:
                         asset_id=asset.id,
                         scan_job_id=job.id,
                         findings=results,
+                        policy_version=policy_version,
                     )
                     job = self.inventory.transition_scan_job(
                         workspace_id=workspace_id,
@@ -139,6 +155,7 @@ class ScanJobService:
                     )
                     outcome = "succeeded"
                     span.set_attribute("cryptohawk.scan.findings_count", len(results))
+                    span.set_attribute("cryptohawk.scan.policy_version", policy_version)
                     return job, results
                 except Exception as exc:
                     self.inventory.transition_scan_job(
