@@ -13,6 +13,7 @@ from cryptohawk.domain.models import (
     AssetType,
     CryptoObservation,
     Evidence,
+    Finding,
     Primitive,
     QuantumStatus,
     RiskAssessment,
@@ -114,7 +115,11 @@ def _seed_finding(
         name="Payments API",
         kind=ManagedAssetKind.TLS_ENDPOINT,
         locator="payments.example.com:443",
-        context=ScanContext(internet_exposed=True, asset_criticality=9, data_lifetime_years=8),
+        context=ScanContext(
+            internet_exposed=True,
+            asset_criticality=9,
+            data_lifetime_years=8,
+        ),
     )
     job = inventory.create_scan_job(
         workspace_id=workspace_id,
@@ -137,7 +142,7 @@ def _seed_finding(
         key_size=2048,
         evidence=Evidence(source="tls", locator=asset.locator),
     )
-    finding = RiskAssessment(
+    risk = RiskAssessment(
         observation_id=observation.id,
         score=80,
         severity=Severity.CRITICAL,
@@ -145,9 +150,10 @@ def _seed_finding(
         reasons=["Quantum-vulnerable public-key cryptography."],
         migration_target="ML-KEM hybrid deployment",
     )
-    from cryptohawk.domain.models import Finding
-
-    prepared = continuous.prepare_findings(job.id, [Finding(observation=observation, risk=finding)])
+    prepared = continuous.prepare_findings(
+        job.id,
+        [Finding(observation=observation, risk=risk)],
+    )
     findings.upsert_many(
         prepared,
         workspace_id=workspace_id,
@@ -171,7 +177,10 @@ def _seed_finding(
     return asset, prepared[0]
 
 
-def test_analyst_can_create_and_update_migration_work(tmp_path: Path, monkeypatch) -> None:
+def test_analyst_can_create_and_update_migration_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     client, inventory, findings, _, continuous = _client(tmp_path, monkeypatch)
     owner_token, workspace_id = _bootstrap(client)
     asset, finding = _seed_finding(inventory, findings, continuous, workspace_id)
@@ -225,7 +234,10 @@ def test_analyst_can_create_and_update_migration_work(tmp_path: Path, monkeypatc
     assert [item["id"] for item in listed.json()] == [body["id"]]
 
 
-def test_viewer_is_read_only_and_workspace_boundary_is_enforced(tmp_path: Path, monkeypatch) -> None:
+def test_viewer_is_read_only_and_workspace_boundary_is_enforced(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     client, inventory, findings, auth, continuous = _client(tmp_path, monkeypatch)
     owner_token, workspace_id = _bootstrap(client)
     _, finding = _seed_finding(inventory, findings, continuous, workspace_id)
