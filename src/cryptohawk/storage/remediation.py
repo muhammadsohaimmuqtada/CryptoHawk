@@ -278,6 +278,10 @@ class RemediationRepository:
             if "status" in changes and changes["status"] is not None:
                 target = RemediationStatus(str(changes["status"]))
                 current_status = RemediationStatus(row.status)
+                if target == RemediationStatus.VERIFIED:
+                    raise ValueError(
+                        "verified status can only be reached through rescan verification"
+                    )
                 if (
                     target != current_status
                     and target not in _ALLOWED_TRANSITIONS[current_status]
@@ -285,10 +289,6 @@ class RemediationRepository:
                     raise ValueError(
                         "invalid remediation transition: "
                         f"{current_status.value} -> {target.value}"
-                    )
-                if target == RemediationStatus.VERIFIED:
-                    raise ValueError(
-                        "verified status can only be reached through rescan verification"
                     )
                 row.status = target.value
                 if target == RemediationStatus.ACCEPTED_RISK:
