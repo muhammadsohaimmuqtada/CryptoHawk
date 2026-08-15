@@ -67,14 +67,18 @@ def _finding(
     )
 
 
-def test_builtins_are_deterministic_and_recommended_is_default(tmp_path: Path) -> None:
+def test_builtins_are_deterministic_and_recommended_is_default(
+    tmp_path: Path,
+) -> None:
     _, policies, workspace, _ = _repositories(tmp_path)
 
     first = policies.list_packs(workspace_id=workspace.id)
     second = policies.list_packs(workspace_id=workspace.id)
     effective = policies.effective_policy(workspace.id)
 
-    assert [item.pack.slug for item in first] == [item.pack.slug for item in second]
+    assert [item.pack.slug for item in first] == [
+        item.pack.slug for item in second
+    ]
     assert {item.pack.slug for item in first} == {
         "cryptohawk-recommended",
         "strict-modern",
@@ -86,7 +90,9 @@ def test_builtins_are_deterministic_and_recommended_is_default(tmp_path: Path) -
     assert effective.provenance_ref.startswith(f"policy:{effective.pack.id}@1:")
 
 
-def test_custom_policy_versions_are_immutable_and_tenant_scoped(tmp_path: Path) -> None:
+def test_custom_policy_versions_are_immutable_and_tenant_scoped(
+    tmp_path: Path,
+) -> None:
     _, policies, workspace, other = _repositories(tmp_path)
     created = policies.create_pack(
         workspace_id=workspace.id,
@@ -114,7 +120,10 @@ def test_custom_policy_versions_are_immutable_and_tenant_scoped(tmp_path: Path) 
     assert version_two.version == 2
     assert version_two.rules_hash != first_hash
 
-    reloaded = policies.get_pack(workspace_id=workspace.id, policy_id=created.pack.id)
+    reloaded = policies.get_pack(
+        workspace_id=workspace.id,
+        policy_id=created.pack.id,
+    )
     assert reloaded is not None
     assert [version.version for version in reloaded.versions] == [2, 1]
     assert reloaded.versions[1].rules_hash == first_hash
@@ -129,7 +138,9 @@ def test_custom_policy_versions_are_immutable_and_tenant_scoped(tmp_path: Path) 
         )
 
     builtin = next(
-        item for item in policies.list_packs(workspace_id=workspace.id) if item.pack.built_in
+        item
+        for item in policies.list_packs(workspace_id=workspace.id)
+        if item.pack.built_in
     )
     with pytest.raises(ValueError, match="immutable"):
         policies.create_version(
@@ -173,14 +184,19 @@ def test_policy_evaluator_adds_baseline_result_without_changing_risk_score(
     assert "harvest-now-decrypt-later" in evaluated.risk.policy_controls
 
 
-def test_policy_evaluator_enforces_tls_and_reviews_unknowns(tmp_path: Path) -> None:
+def test_policy_evaluator_enforces_tls_and_reviews_unknowns(
+    tmp_path: Path,
+) -> None:
     _, policies, workspace, _ = _repositories(tmp_path)
     custom = policies.create_pack(
         workspace_id=workspace.id,
         slug="custom-modern",
         name="Custom Modern",
         description="",
-        rules=CryptoPolicyRules(minimum_tls_version="1.3", unknown_family_action="review"),
+        rules=CryptoPolicyRules(
+            minimum_tls_version="1.3",
+            unknown_family_action="review",
+        ),
         created_by="user:owner",
         activate=True,
     )
@@ -195,7 +211,11 @@ def test_policy_evaluator_enforces_tls_and_reviews_unknowns(tmp_path: Path) -> N
         crypto_asset_type=CryptoAssetType.PROTOCOL,
         quantum_status=QuantumStatus.UNKNOWN,
     )
-    tls_result = CryptoPolicyEvaluator().apply(tls_finding, ScanContext(), policy)
+    tls_result = CryptoPolicyEvaluator().apply(
+        tls_finding,
+        ScanContext(),
+        policy,
+    )
     assert tls_result.risk.policy_status == "fail"
     assert "minimum-tls-version" in tls_result.risk.policy_controls
 
@@ -205,7 +225,11 @@ def test_policy_evaluator_enforces_tls_and_reviews_unknowns(tmp_path: Path) -> N
         key_size=None,
         quantum_status=QuantumStatus.UNKNOWN,
     )
-    unknown_result = CryptoPolicyEvaluator().apply(unknown_finding, ScanContext(), policy)
+    unknown_result = CryptoPolicyEvaluator().apply(
+        unknown_finding,
+        ScanContext(),
+        policy,
+    )
     assert unknown_result.risk.policy_status == "review"
     assert "unknown-family" in unknown_result.risk.policy_controls
 
