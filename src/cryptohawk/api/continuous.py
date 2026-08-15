@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from cryptohawk.api.auth import inventory, require_workspace_role
+from cryptohawk.api.remediation import router as remediation_router
 from cryptohawk.api.repositories import router as repository_router
 from cryptohawk.api.runtime import continuous_repo
 from cryptohawk.api.schemas import ScanScheduleCreateRequest
@@ -21,6 +22,7 @@ from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
 
 router = APIRouter(tags=["continuous-scanning"])
 router.include_router(repository_router)
+router.include_router(remediation_router)
 
 ViewerPrincipal = Annotated[
     Principal,

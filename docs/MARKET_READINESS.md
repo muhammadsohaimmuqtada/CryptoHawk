@@ -46,7 +46,7 @@ Connector credential handling is documented in `docs/SECRET_HANDLING.md` and is 
 
 Application telemetry uses structured JSON logs with request/trace/job correlation and token redaction, low-cardinality Prometheus metrics without tenant identifiers, OpenTelemetry spans with W3C trace-context continuation and optional OTLP/HTTP export, and separate liveness/readiness probes. API readiness verifies database connectivity and Docker Compose gates the web tier on API readiness.
 
-PostgreSQL disaster recovery uses checksum-protected custom-format backups, refuses non-empty restore targets, restores in a fail-fast single transaction, and is exercised in CI against PostgreSQL 17. The recovery drill verifies restored authentication, workspace/assets, encrypted connector credentials, successful scan evidence/history, schedules, durable queue state, audit events, quota runtime and Alembic revision before the gate passes. The operator procedure is documented in `docs/POSTGRES_DISASTER_RECOVERY.md`.
+PostgreSQL disaster recovery uses checksum-protected custom-format backups, refuses non-empty restore targets, restores in a fail-fast single transaction, and is exercised in CI against PostgreSQL 17. The recovery drill verifies restored authentication, workspace/assets, encrypted connector credentials, successful scan evidence/history, schedules, durable queue state, audit events, quota runtime, remediation state, and Alembic revision before the gate passes. The operator procedure is documented in `docs/POSTGRES_DISASTER_RECOVERY.md`.
 
 The PostgreSQL load/soak gate creates a multi-tenant estate and drives sustained durable queue churn through quota-aware claims, heartbeats, transient retries and terminal completion. The CI baseline covers 4 workspaces, 160 managed assets and 800 scan jobs with bounded execution, while validating tenant progress, retry-attempt accounting, stale-lease absence and zero leaked scan capacity. Queue candidate selection is explicitly tested with a saturated tenant backlog deeper than the global candidate window so one tenant cannot hide another tenant that still has capacity.
 
@@ -58,13 +58,15 @@ Continuous scanning uses deterministic schedule occurrence IDs and per-scan obse
 
 - [x] Workspace-aware onboarding and asset inventory UI
 - [x] Scan history, failure diagnostics, and rerun controls
-- [ ] Migration queue with owner, status, due date, and evidence of remediation
+- [x] Migration queue with owner, status, due date, and evidence of remediation
 - [ ] Policy packs and organization-specific crypto baselines
 - [ ] Exportable executive and engineering reports
 
 The authenticated operator surface supports first-run owner bootstrap, workspace creation and switching, guided registration for the five currently executable managed collectors (TLS, certificate estate, SSH, repository and container image), durable first-scan submission, workspace-scoped asset search/filtering, latest scan state and explicit reruns. Repository onboarding uses the repository-native API so commit identity and drift semantics are preserved; inventory-only asset kinds are not misrepresented as executable collectors. The frontend uses local/system typography and does not depend on third-party font delivery.
 
 The operations history console reads the existing tenant-scoped durable job feed and joins it to managed-asset identity. Operators can filter by execution status, search by asset/locator/job identifier, inspect requested/started/finished timestamps and duration, findings counts and retained failure messages, and explicitly queue a new durable run from terminal jobs. It deliberately reuses the established authorization, quota and queue-submission APIs rather than introducing a parallel control path.
+
+The migration queue promotes a retained managed-asset finding into accountable remediation work keyed to the stable continuous-scanning observation fingerprint. Analysts can assign ownership, priority, due date, migration target, notes and controlled workflow state; accepted risk requires a recorded rationale. `verified` is evidence-only and cannot be set manually: the newest successful scan of the same asset must be newer than the source evidence and must prove that the original cryptographic fingerprint is absent. Failed verification retains the latest risk/evidence details and returns the item to active work. Migration ownership, workflow state, source finding snapshot and fingerprint are also covered by the PostgreSQL backup/restore drill.
 
 ## Serious-impact gate
 

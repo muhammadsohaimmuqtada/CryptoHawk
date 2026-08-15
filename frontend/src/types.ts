@@ -86,6 +86,47 @@ export type ScanJob = {
   error_message?: string
 }
 
+export type RemediationStatus =
+  | 'open'
+  | 'planned'
+  | 'in-progress'
+  | 'blocked'
+  | 'ready-for-verification'
+  | 'verified'
+  | 'accepted-risk'
+
+export type RemediationPriority = 'critical' | 'high' | 'medium' | 'low'
+
+export type MigrationItem = {
+  id: string
+  workspace_id: string
+  asset_id: string
+  observation_fingerprint: string
+  source_finding_id: string
+  source_scan_job_id: string
+  title: string
+  owner?: string
+  status: RemediationStatus
+  priority: RemediationPriority
+  target_algorithm?: string
+  due_date?: string
+  notes?: string
+  acceptance_reason?: string
+  verification_job_id?: string
+  verified_at?: string
+  verification_evidence: Record<string, string | number | boolean | null>
+  source_finding: Finding
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type RemediationVerification = {
+  item: MigrationItem
+  verified: boolean
+  outcome: string
+}
+
 export type IssuedToken = {
   token: string
   expires_at: string
@@ -94,7 +135,7 @@ export type IssuedToken = {
 }
 
 export type AuthMode = 'checking' | 'bootstrap' | 'login' | 'ready'
-export type OperatorView = 'command' | 'inventory' | 'history'
+export type OperatorView = 'command' | 'inventory' | 'history' | 'migration'
 
 export type ScannableAssetKind =
   | 'tls-endpoint'
