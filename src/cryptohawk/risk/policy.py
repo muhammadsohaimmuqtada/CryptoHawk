@@ -7,7 +7,10 @@ from cryptohawk.knowledge.algorithms import get_profile, normalize_family
 _STATUS_ORDER: dict[PolicyDisposition, int] = {"pass": 0, "review": 1, "fail": 2}
 
 
-def _max_status(current: PolicyDisposition, candidate: PolicyDisposition) -> PolicyDisposition:
+def _max_status(
+    current: PolicyDisposition,
+    candidate: PolicyDisposition,
+) -> PolicyDisposition:
     return candidate if _STATUS_ORDER[candidate] > _STATUS_ORDER[current] else current
 
 
@@ -52,7 +55,9 @@ class CryptoPolicyEvaluator:
             if observation.key_size is None:
                 status = _max_status(status, "review")
                 controls.append("minimum-rsa-bits")
-                reasons.append("RSA key size is unknown; minimum-key-size compliance is unproven")
+                reasons.append(
+                    "RSA key size is unknown; minimum-key-size compliance is unproven"
+                )
             elif observation.key_size < rules.minimum_rsa_bits:
                 status = "fail"
                 controls.append("minimum-rsa-bits")
@@ -65,7 +70,9 @@ class CryptoPolicyEvaluator:
             if observation.key_size is None:
                 status = _max_status(status, "review")
                 controls.append("minimum-aes-bits")
-                reasons.append("AES key size is unknown; minimum-key-size compliance is unproven")
+                reasons.append(
+                    "AES key size is unknown; minimum-key-size compliance is unproven"
+                )
             elif observation.key_size < rules.minimum_aes_bits:
                 status = "fail"
                 controls.append("minimum-aes-bits")
@@ -80,7 +87,9 @@ class CryptoPolicyEvaluator:
             if observed_tls is None:
                 status = _max_status(status, "review")
                 controls.append("minimum-tls-version")
-                reasons.append("TLS protocol version is unknown; baseline compliance is unproven")
+                reasons.append(
+                    "TLS protocol version is unknown; baseline compliance is unproven"
+                )
             elif required_tls is not None and observed_tls < required_tls:
                 status = "fail"
                 controls.append("minimum-tls-version")
@@ -131,7 +140,9 @@ class CryptoPolicyEvaluator:
             )
 
         if not reasons:
-            reasons.append("Observed cryptography satisfies the selected organization baseline")
+            reasons.append(
+                "Observed cryptography satisfies the selected organization baseline"
+            )
 
         policy_risk = finding.risk.model_copy(
             update={
