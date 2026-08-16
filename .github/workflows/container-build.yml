@@ -1,0 +1,50 @@
+name: Container Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  container-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CRYPTOHAWK_POSTGRES_PASSWORD: cryptohawk-container-ci
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-container-ci@db:5432/cryptohawk
+      CRYPTOHAWK_CONNECTOR_ENCRYPTION_KEYS: 1:a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s
+      CRYPTOHAWK_CONNECTOR_ENCRYPTION_ACTIVE_VERSION: '1'
+      CRYPTOHAWK_CORS_ORIGINS: https://cryptohawk.example.invalid
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate production Compose rendering
+        run: docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+      - name: Build backend image
+        run: docker build --pull --tag cryptohawk-api:ci .
+      - name: Build web image
+        run: docker build --pull --tag cryptohawk-web:ci ./frontend
+      - name: Verify images are non-root
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' cryptohawk-api:ci)" = "cryptohawk"
+          test "$(docker image inspect --format '{{.Config.User}}' cryptohawk-web:ci)" = "nginx"
+      - name: Validate nginx runtime configuration
+        run: |
+          docker network create cryptohawk-container-ci
+          cleanup() {
+            docker rm -f api >/dev/null 2>&1 || true
+            docker network rm cryptohawk-container-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d \
+            --name api \
+            --network cryptohawk-container-ci \
+            cryptohawk-api:ci \
+            sleep 30
+          docker run --rm \
+            --network cryptohawk-container-ci \
+            cryptohawk-web:ci \
+            nginx -t
+      - name: Validate backend runtime package
+        run: docker run --rm cryptohawk-api:ci python -c 'import cryptohawk; assert cryptohawk.__version__ == "0.9.0"'
