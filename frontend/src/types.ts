@@ -185,6 +185,75 @@ export type EffectiveCryptoPolicy = {
   assigned_at: string
 }
 
+export type ReportMetadata = {
+  generated_at: string
+  workspace_id: string
+  workspace_name: string
+  workspace_slug: string
+  policy: {
+    name: string
+    version: number
+    rules_hash: string
+    provenance_ref: string
+  }
+}
+
+export type ExecutivePriority = {
+  asset_id: string
+  asset_name: string
+  asset_kind: string
+  algorithm: string
+  family: string
+  risk_score: number
+  severity: string
+  quantum_status: string
+  policy_status?: string
+  migration_target?: string
+  remediation_status?: string
+  remediation_owner?: string
+  due_date?: string
+}
+
+export type ExecutiveReport = {
+  metadata: ReportMetadata
+  summary: {
+    assets_total: number
+    assets_enabled: number
+    active_findings: number
+    severity: Record<string, number>
+    quantum: Record<string, number>
+    policy: Record<string, number>
+    remediation: Record<string, number>
+    overdue_remediation: number
+    unowned_remediation: number
+    drift_30d: Record<string, number>
+  }
+  top_priorities: ExecutivePriority[]
+}
+
+export type EngineeringFinding = {
+  fingerprint: string
+  asset_id: string
+  asset_name: string
+  asset_kind: string
+  locator: string
+  environment: string
+  algorithm: string
+  family: string
+  risk_score: number
+  severity: string
+  quantum_status: string
+  policy_status?: string
+  evidence_hash: string
+  remediation_status?: string
+  remediation_owner?: string
+}
+
+export type EngineeringReport = {
+  metadata: ReportMetadata
+  findings: EngineeringFinding[]
+}
+
 export type IssuedToken = {
   token: string
   expires_at: string
@@ -193,7 +262,7 @@ export type IssuedToken = {
 }
 
 export type AuthMode = 'checking' | 'bootstrap' | 'login' | 'ready'
-export type OperatorView = 'command' | 'inventory' | 'history' | 'migration' | 'policy'
+export type OperatorView = 'command' | 'inventory' | 'history' | 'migration' | 'policy' | 'reporting'
 
 export type ScannableAssetKind =
   | 'tls-endpoint'
