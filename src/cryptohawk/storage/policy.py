@@ -122,7 +122,7 @@ def _rules_hash(rules: CryptoPolicyRules) -> str:
 
 
 def _stable_id(workspace_id: str, value: str) -> str:
-    return hashlib.sha256(f"{workspace_id}|{value}".encode()).hexdigest()
+    return hashlib.sha256(f"{workspace_id}|{value}".encode()).hexdigest()[:32]
 
 
 _BUILTIN_PACKS: tuple[tuple[str, str, str, CryptoPolicyRules], ...] = (
