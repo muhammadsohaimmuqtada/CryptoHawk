@@ -11,8 +11,8 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
@@ -30,12 +30,52 @@ jobs:
           exit "$status"
       - name: Preserve Python dependency audit
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pip-audit-report
           path: pip-audit.json
           if-no-files-found: ignore
           retention-days: 14
+
+  release-qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cryptohawk_release
+          POSTGRES_USER: cryptohawk
+          POSTGRES_PASSWORD: cryptohawk-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cryptohawk -d cryptohawk_release"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CRYPTOHAWK_ENVIRONMENT: production
+      CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_release
+      CRYPTOHAWK_CORS_ORIGINS: https://cryptohawk.example.invalid
+      CRYPTOHAWK_ALLOW_LEGACY_GLOBAL_API: 'false'
+      CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Configure ephemeral production connector key
+        run: |
+          key=$(python -c 'from cryptohawk.security.secrets import VersionedAesGcmCipher; print(VersionedAesGcmCipher.generate_key())')
+          echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_KEYS=1:${key}" >> "$GITHUB_ENV"
+          echo "CRYPTOHAWK_CONNECTOR_ENCRYPTION_ACTIVE_VERSION=1" >> "$GITHUB_ENV"
+      - name: Migrate release database
+        run: alembic upgrade head
+      - name: Exercise Discover-Assess-Migrate-Prove release path
+        run: python scripts/release_qualification.py
 
   postgres-dr:
     runs-on: ubuntu-latest
@@ -61,8 +101,8 @@ jobs:
       ADMIN_PG_URL: postgresql://cryptohawk:cryptohawk-ci@127.0.0.1:5432/postgres
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
@@ -160,8 +200,8 @@ jobs:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_load
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
@@ -199,8 +239,8 @@ jobs:
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-ci@127.0.0.1:5432/cryptohawk_failure
       CRYPTOHAWK_AUTO_CREATE_SCHEMA: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
@@ -226,8 +266,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
