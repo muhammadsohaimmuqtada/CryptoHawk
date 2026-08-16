@@ -1,10 +1,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import PolicyShell from './PolicyShell'
+import ReportingShell from './ReportingShell'
 import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <PolicyShell />
+    <ReportingShell />
   </React.StrictMode>,
 )
