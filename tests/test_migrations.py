@@ -10,6 +10,7 @@ from cryptohawk.storage import auth as auth_storage  # noqa: F401
 from cryptohawk.storage import continuous as continuous_storage  # noqa: F401
 from cryptohawk.storage import credentials as credential_storage  # noqa: F401
 from cryptohawk.storage import inventory as inventory_storage  # noqa: F401
+from cryptohawk.storage import policy as policy_storage  # noqa: F401
 from cryptohawk.storage import queue as queue_storage  # noqa: F401
 from cryptohawk.storage import quotas as quota_storage  # noqa: F401
 from cryptohawk.storage import remediation as remediation_storage  # noqa: F401

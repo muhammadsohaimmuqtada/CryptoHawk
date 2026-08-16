@@ -8,6 +8,8 @@ export type Summary = {
   pqc_ready: number
 }
 
+export type PolicyDisposition = 'pass' | 'review' | 'fail'
+
 export type Finding = {
   observation: {
     id: string
@@ -18,6 +20,8 @@ export type Finding = {
     family: string
     primitive: string
     key_size?: number
+    protocol_version?: string
+    confidence?: number
     evidence: {
       source: string
       locator?: string
@@ -32,6 +36,13 @@ export type Finding = {
     reasons?: string[]
     migration_target?: string
     migration_strategy?: string
+    policy_id?: string
+    policy_version?: number
+    policy_name?: string
+    policy_status?: PolicyDisposition
+    policy_reasons?: string[]
+    policy_controls?: string[]
+    policy_rules_hash?: string
   }
 }
 
@@ -127,6 +138,53 @@ export type RemediationVerification = {
   outcome: string
 }
 
+export type CryptoPolicyRules = {
+  minimum_rsa_bits: number
+  minimum_aes_bits: number
+  minimum_tls_version: '1.2' | '1.3'
+  disallowed_families: string[]
+  quantum_vulnerable_default: 'review' | 'fail'
+  internet_exposed_quantum_action: 'review' | 'fail'
+  long_lived_data_years: number
+  unknown_family_action: PolicyDisposition
+  minimum_detection_confidence: number
+}
+
+export type CryptoPolicyPack = {
+  id: string
+  workspace_id: string
+  slug: string
+  name: string
+  description: string
+  built_in: boolean
+  created_by: string
+  created_at: string
+}
+
+export type CryptoPolicyVersion = {
+  id: string
+  policy_id: string
+  workspace_id: string
+  version: number
+  rules: CryptoPolicyRules
+  rules_hash: string
+  created_by: string
+  created_at: string
+}
+
+export type CryptoPolicyPackWithVersions = {
+  pack: CryptoPolicyPack
+  versions: CryptoPolicyVersion[]
+  active_version?: number
+}
+
+export type EffectiveCryptoPolicy = {
+  pack: CryptoPolicyPack
+  version: CryptoPolicyVersion
+  assigned_by: string
+  assigned_at: string
+}
+
 export type IssuedToken = {
   token: string
   expires_at: string
@@ -135,7 +193,7 @@ export type IssuedToken = {
 }
 
 export type AuthMode = 'checking' | 'bootstrap' | 'login' | 'ready'
-export type OperatorView = 'command' | 'inventory' | 'history' | 'migration'
+export type OperatorView = 'command' | 'inventory' | 'history' | 'migration' | 'policy'
 
 export type ScannableAssetKind =
   | 'tls-endpoint'

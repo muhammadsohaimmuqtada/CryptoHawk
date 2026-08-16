@@ -59,7 +59,7 @@ Continuous scanning uses deterministic schedule occurrence IDs and per-scan obse
 - [x] Workspace-aware onboarding and asset inventory UI
 - [x] Scan history, failure diagnostics, and rerun controls
 - [x] Migration queue with owner, status, due date, and evidence of remediation
-- [ ] Policy packs and organization-specific crypto baselines
+- [x] Policy packs and organization-specific crypto baselines
 - [ ] Exportable executive and engineering reports
 
 The authenticated operator surface supports first-run owner bootstrap, workspace creation and switching, guided registration for the five currently executable managed collectors (TLS, certificate estate, SSH, repository and container image), durable first-scan submission, workspace-scoped asset search/filtering, latest scan state and explicit reruns. Repository onboarding uses the repository-native API so commit identity and drift semantics are preserved; inventory-only asset kinds are not misrepresented as executable collectors. The frontend uses local/system typography and does not depend on third-party font delivery.
@@ -67,6 +67,8 @@ The authenticated operator surface supports first-run owner bootstrap, workspace
 The operations history console reads the existing tenant-scoped durable job feed and joins it to managed-asset identity. Operators can filter by execution status, search by asset/locator/job identifier, inspect requested/started/finished timestamps and duration, findings counts and retained failure messages, and explicitly queue a new durable run from terminal jobs. It deliberately reuses the established authorization, quota and queue-submission APIs rather than introducing a parallel control path.
 
 The migration queue promotes a retained managed-asset finding into accountable remediation work keyed to the stable continuous-scanning observation fingerprint. Analysts can assign ownership, priority, due date, migration target, notes and controlled workflow state; accepted risk requires a recorded rationale. `verified` is evidence-only and cannot be set manually: the newest successful scan of the same asset must be newer than the source evidence and must prove that the original cryptographic fingerprint is absent. Failed verification retains the latest risk/evidence details and returns the item to active work. Migration ownership, workflow state, source finding snapshot and fingerprint are also covered by the PostgreSQL backup/restore drill.
+
+Cryptographic policy is a versioned compliance overlay and does not replace or lower CryptoHawk's deterministic core risk score. Workspaces receive immutable built-in baselines and may create immutable custom versions, then explicitly activate one exact version. Managed scans resolve the active policy once per execution and retain policy ID, version and rules hash with findings plus bounded policy provenance in scan history, including zero-finding scans. Policy controls cover key-size floors, TLS minimums, prohibited families, quantum-vulnerable exposure, internet exposure, long-lived/HNDL data, unknown algorithms and evidence-confidence thresholds. Viewer/admin RBAC, tenant isolation, version races, immutable built-ins and PostgreSQL disaster recovery are covered by CI.
 
 ## Serious-impact gate
 

@@ -1,10 +1,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import MigrationShell from './MigrationShell'
+import PolicyShell from './PolicyShell'
 import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <MigrationShell />
+    <PolicyShell />
   </React.StrictMode>,
 )
