@@ -4,7 +4,7 @@ CryptoHawk 0.9 is the commercial-pilot release line. A commit qualifies only whe
 
 ## Automated release gates
 
-The CI workflow must pass all of these jobs:
+The repository workflows must pass all of these jobs:
 
 1. `backend`
    - Ruff
@@ -40,6 +40,13 @@ The CI workflow must pass all of these jobs:
    - final-attempt expiry
    - transient collector/network retry
    - real PostgreSQL stop/restart and stale-connection recovery
+7. `container-build`
+   - production Compose configuration renders with required variables
+   - backend and frontend container images build from clean inputs
+   - backend image runs as the non-root `cryptohawk` user
+   - web image runs as the non-root `nginx` user on an unprivileged port
+   - nginx configuration validates at runtime
+   - backend image exposes the expected CryptoHawk release version
 
 No job may be skipped or converted to allow-failure for a release candidate.
 
@@ -73,10 +80,11 @@ A release must demonstrate:
 
 Before labeling a commit as a pilot release:
 
-- confirm all CI jobs correspond to the candidate SHA;
+- confirm all CI and container-build jobs correspond to the candidate SHA;
 - review dependency-audit output rather than only job status;
 - review migration changes and downgrade/restore strategy;
 - verify no secrets, runtime databases or target artifacts are committed;
+- confirm backend/web images run non-root and were built by the candidate SHA;
 - confirm README/status language says commercial-pilot candidate, not GA;
 - confirm `docs/MARKET_READINESS.md` still distinguishes repository P0 completion from real-world pilot evidence;
 - confirm production deployment configuration uses the runbook in `docs/PRODUCTION_DEPLOYMENT.md`.
