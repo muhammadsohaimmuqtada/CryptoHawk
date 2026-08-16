@@ -30,6 +30,21 @@ jobs:
           test "$(docker image inspect --format '{{.Config.User}}' cryptohawk-api:ci)" = "cryptohawk"
           test "$(docker image inspect --format '{{.Config.User}}' cryptohawk-web:ci)" = "nginx"
       - name: Validate nginx runtime configuration
-        run: docker run --rm cryptohawk-web:ci nginx -t
+        run: |
+          docker network create cryptohawk-container-ci
+          cleanup() {
+            docker rm -f api >/dev/null 2>&1 || true
+            docker network rm cryptohawk-container-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d \
+            --name api \
+            --network cryptohawk-container-ci \
+            cryptohawk-api:ci \
+            sleep 30
+          docker run --rm \
+            --network cryptohawk-container-ci \
+            cryptohawk-web:ci \
+            nginx -t
       - name: Validate backend runtime package
         run: docker run --rm cryptohawk-api:ci python -c 'import cryptohawk; assert cryptohawk.__version__ == "0.9.0"'
