@@ -193,7 +193,9 @@ class ReportingService:
             item for item in migration_items if item.status not in _TERMINAL_REMEDIATION
         ]
         overdue = sum(
-            1 for item in active_items if item.due_date is not None and item.due_date < current_date
+            1
+            for item in active_items
+            if item.due_date is not None and item.due_date < current_date
         )
         unowned = sum(1 for item in active_items if not item.owner)
 
@@ -234,15 +236,18 @@ class ReportingService:
             assets_total=len(assets),
             assets_enabled=sum(1 for asset in assets if asset.enabled),
             active_findings=len(engineering.findings),
-            severity={name: severity.get(name, 0) for name in (
-                "critical", "high", "medium", "low", "info"
-            )},
-            quantum={name: quantum.get(name, 0) for name in (
-                "vulnerable", "transition", "safe", "unknown"
-            )},
-            policy={name: policy.get(name, 0) for name in (
-                "fail", "review", "pass", "unassessed"
-            )},
+            severity={
+                name: severity.get(name, 0)
+                for name in ("critical", "high", "medium", "low", "info")
+            },
+            quantum={
+                name: quantum.get(name, 0)
+                for name in ("vulnerable", "transition", "safe", "unknown")
+            },
+            policy={
+                name: policy.get(name, 0)
+                for name in ("fail", "review", "pass", "unassessed")
+            },
             remediation=dict(sorted(remediation.items())),
             overdue_remediation=overdue,
             unowned_remediation=unowned,
@@ -318,30 +323,73 @@ class ReportingService:
             ("Unowned remediation", summary.unowned_remediation),
         )
         card_html = "".join(
-            f'<div class="card"><strong>{value}</strong><span>{html.escape(label)}</span></div>'
+            (
+                f'<div class="card"><strong>{value}</strong>'
+                f"<span>{html.escape(label)}</span></div>"
+            )
             for label, value in cards
         )
-        return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>CryptoHawk Executive Report</title>
-<style>
-body{{font-family:Arial,sans-serif;color:#18212f;margin:40px;line-height:1.45}}
-h1{{margin:0}} .meta{{color:#5d6878;margin:8px 0 28px}} .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
-.card{{border:1px solid #d9dee7;border-radius:10px;padding:16px}} .card strong{{font-size:26px;display:block}} .card span{{color:#5d6878}}
-table{{width:100%;border-collapse:collapse;margin-top:12px}} th,td{{padding:9px;border-bottom:1px solid #e5e9ef;text-align:left;font-size:13px}}
-h2{{margin-top:30px;font-size:18px}} code{{font-size:11px;word-break:break-all}} @media print{{body{{margin:20px}}}}
-</style></head><body>
-<h1>CryptoHawk Executive Cryptographic Posture</h1>
-<div class="meta">{html.escape(metadata.workspace_name)} · generated {metadata.generated_at.isoformat()}</div>
-<div class="grid">{card_html}</div>
-<h2>Active cryptographic policy</h2>
-<p><strong>{html.escape(metadata.policy.name)} v{metadata.policy.version}</strong><br><code>{html.escape(metadata.policy.rules_hash)}</code></p>
-<h2>Top migration priorities</h2>
-<table><thead><tr><th>Asset</th><th>Algorithm</th><th>Risk</th><th>Severity</th><th>PQ status</th><th>Remediation</th></tr></thead><tbody>{priority_rows}</tbody></table>
-<h2>30-day cryptographic drift</h2>
-<p>{html.escape(', '.join(f'{key}: {value}' for key, value in summary.drift_30d.items()) or 'No recorded drift events.')}</p>
-<p class="meta">This report is generated deterministically from CryptoHawk active observation state, retained remediation records, and the effective workspace policy. Historical source snippets and connector secrets are not included.</p>
-</body></html>"""
+        drift_text = html.escape(
+            ", ".join(
+                f"{key}: {value}" for key, value in summary.drift_30d.items()
+            )
+            or "No recorded drift events."
+        )
+        style = "\n".join(
+            [
+                "body{font-family:Arial,sans-serif;color:#18212f;margin:40px;line-height:1.45}",
+                "h1{margin:0}",
+                ".meta{color:#5d6878;margin:8px 0 28px}",
+                ".grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}",
+                ".card{border:1px solid #d9dee7;border-radius:10px;padding:16px}",
+                ".card strong{font-size:26px;display:block}",
+                ".card span{color:#5d6878}",
+                "table{width:100%;border-collapse:collapse;margin-top:12px}",
+                "th,td{padding:9px;border-bottom:1px solid #e5e9ef;text-align:left}",
+                "th,td{font-size:13px}",
+                "h2{margin-top:30px;font-size:18px}",
+                "code{font-size:11px;word-break:break-all}",
+                "@media print{body{margin:20px}}",
+            ]
+        )
+        policy_html = (
+            f"<p><strong>{html.escape(metadata.policy.name)} "
+            f"v{metadata.policy.version}</strong><br>"
+            f"<code>{html.escape(metadata.policy.rules_hash)}</code></p>"
+        )
+        table_header = (
+            "<table><thead><tr><th>Asset</th><th>Algorithm</th><th>Risk</th>"
+            "<th>Severity</th><th>PQ status</th><th>Remediation</th></tr></thead>"
+        )
+        generated = html.escape(metadata.generated_at.isoformat())
+        workspace_name = html.escape(metadata.workspace_name)
+        disclaimer = (
+            "This report is generated deterministically from CryptoHawk active "
+            "observation state, retained remediation records, and the effective "
+            "workspace policy. Historical source snippets and connector secrets "
+            "are not included."
+        )
+        return "\n".join(
+            [
+                "<!doctype html>",
+                '<html lang="en"><head><meta charset="utf-8">',
+                "<title>CryptoHawk Executive Report</title>",
+                f"<style>{style}</style></head><body>",
+                "<h1>CryptoHawk Executive Cryptographic Posture</h1>",
+                f'<div class="meta">{workspace_name} · generated {generated}</div>',
+                f'<div class="grid">{card_html}</div>',
+                "<h2>Active cryptographic policy</h2>",
+                policy_html,
+                "<h2>Top migration priorities</h2>",
+                f"{table_header}<tbody>{priority_rows}</tbody></table>",
+                "<h2>30-day cryptographic drift</h2>",
+                f"<p>{drift_text}</p>",
+                f'<p class="meta">{html.escape(disclaimer)}</p>',
+                "</body></html>",
+            ]
+        )
 
     def current_cbom(self, workspace_id: str) -> dict:
+        self._metadata(workspace_id, _utc())
         _, current = self._current_rows(workspace_id)
         return CycloneDXExporter().export([finding for _, finding in current])
