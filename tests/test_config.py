@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pytest
 
 from cryptohawk.config import RuntimeConfigurationError, Settings
@@ -71,3 +75,30 @@ def test_production_allows_empty_cors_for_same_origin_deployment() -> None:
     settings.validate_runtime()
 
     assert settings.cors_origin_list == []
+
+
+def test_global_settings_fail_closed_during_unsafe_production_import() -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "CRYPTOHAWK_ENVIRONMENT": "production",
+            "CRYPTOHAWK_DATABASE_URL": "sqlite:///./unsafe-production.db",
+            "CRYPTOHAWK_CORS_ORIGINS": "https://cryptohawk.example.com",
+            "CRYPTOHAWK_ALLOW_LEGACY_GLOBAL_API": "false",
+            "CRYPTOHAWK_AUTO_CREATE_SCHEMA": "false",
+            "CRYPTOHAWK_CONNECTOR_ENCRYPTION_KEYS": _VALID_KEY,
+            "CRYPTOHAWK_CONNECTOR_ENCRYPTION_ACTIVE_VERSION": "1",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import cryptohawk.config"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe production configuration" in result.stderr
+    assert "production requires PostgreSQL" in result.stderr
