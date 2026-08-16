@@ -1,4 +1,14 @@
+from __future__ import annotations
+
+from urllib.parse import urlsplit
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cryptohawk.security.secrets import SecretConfigurationError, VersionedAesGcmCipher
+
+
+class RuntimeConfigurationError(RuntimeError):
+    """Raised when a runtime environment violates CryptoHawk production invariants."""
 
 
 class Settings(BaseSettings):
@@ -41,7 +51,11 @@ class Settings(BaseSettings):
     container_max_file_bytes: int = 2_000_000
     container_max_scan_bytes: int = 150_000_000
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="CRYPTOHAWK_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="CRYPTOHAWK_",
+        extra="ignore",
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -54,6 +68,55 @@ class Settings(BaseSettings):
             for host in self.repository_allowed_hosts.split(",")
             if host.strip()
         ]
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    def validate_runtime(self) -> None:
+        """Reject production configurations that can silently weaken security or durability."""
+        if not self.is_production:
+            return
+
+        errors: list[str] = []
+        database = self.database_url.strip().lower()
+        if not database.startswith(("postgresql://", "postgresql+psycopg://")):
+            errors.append("production requires PostgreSQL")
+        if self.auto_create_schema:
+            errors.append("production requires CRYPTOHAWK_AUTO_CREATE_SCHEMA=false")
+        if self.allow_legacy_global_api:
+            errors.append("legacy global API cannot be enabled in production")
+
+        for origin in self.cors_origin_list:
+            if origin == "*":
+                errors.append("wildcard CORS origins are forbidden in production")
+                continue
+            parsed = urlsplit(origin)
+            if parsed.scheme.lower() != "https" or not parsed.hostname:
+                errors.append(f"production CORS origin must use HTTPS: {origin}")
+                continue
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                errors.append(f"production CORS origin is not a plain origin: {origin}")
+            if parsed.path not in {"", "/"}:
+                errors.append(f"production CORS origin must not contain a path: {origin}")
+            hostname = parsed.hostname.lower().rstrip(".")
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                errors.append(f"loopback CORS origin is forbidden in production: {origin}")
+
+        if not self.connector_encryption_keys.strip():
+            errors.append("production requires connector encryption keys")
+        else:
+            try:
+                VersionedAesGcmCipher.from_spec(
+                    self.connector_encryption_keys,
+                    active_version=self.connector_encryption_active_version,
+                )
+            except SecretConfigurationError as exc:
+                errors.append(f"invalid connector encryption key configuration: {exc}")
+
+        if errors:
+            joined = "; ".join(errors)
+            raise RuntimeConfigurationError(f"unsafe production configuration: {joined}")
 
 
 settings = Settings()
