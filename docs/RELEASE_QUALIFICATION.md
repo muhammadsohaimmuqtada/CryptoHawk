@@ -47,8 +47,13 @@ The repository workflows must pass all of these jobs:
    - web image runs as the non-root `nginx` user on an unprivileged port
    - nginx configuration validates at runtime
    - backend image exposes the expected CryptoHawk release version
+8. `codeql-python` and `codeql-javascript-typescript`
+   - GitHub CodeQL security-extended analysis runs on backend and frontend code
+   - the action is pinned to the reviewed v4.37.7 release commit
 
-No job may be skipped or converted to allow-failure for a release candidate.
+No required job may be skipped or converted to allow-failure for a release candidate.
+
+A green CodeQL job means analysis completed successfully; it does not mean the alert set is empty. Open CodeQL alerts must be reviewed during the manual release review and either fixed or explicitly dispositioned before a pilot release is tagged.
 
 ## Production configuration gate
 
@@ -80,8 +85,9 @@ A release must demonstrate:
 
 Before labeling a commit as a pilot release:
 
-- confirm all CI and container-build jobs correspond to the candidate SHA;
-- review dependency-audit output rather than only job status;
+- confirm all CI, container-build and CodeQL jobs correspond to the candidate SHA;
+- review Python/npm dependency-audit output rather than only job status;
+- review the CodeQL alert set and resolve or explicitly disposition every release-relevant alert;
 - review migration changes and downgrade/restore strategy;
 - verify no secrets, runtime databases or target artifacts are committed;
 - confirm backend/web images run non-root and were built by the candidate SHA;
