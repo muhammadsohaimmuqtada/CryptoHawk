@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanKind, ScanStatus
@@ -20,17 +20,26 @@ from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.remediation import RemediationRepository
 
 
-def _finding(asset_id: str, asset_name: str) -> Finding:
+def _finding(
+    asset_id: str,
+    asset_name: str,
+    *,
+    algorithm: str = "RSA-2048",
+    key_size: int = 2048,
+) -> Finding:
     observation = CryptoObservation(
         asset_id=asset_id,
         asset_name=asset_name,
         asset_type=AssetType.TLS_ENDPOINT,
-        algorithm="RSA-2048",
+        algorithm=algorithm,
         family="RSA",
         primitive=Primitive.PKE,
-        key_size=2048,
+        key_size=key_size,
         confidence=0.98,
-        evidence=Evidence(source="tls", locator="=HYPERLINK(\"https://evil.invalid\")"),
+        evidence=Evidence(
+            source="tls",
+            locator='=HYPERLINK("https://evil.invalid")',
+        ),
     )
     return Finding(
         observation=observation,
@@ -134,7 +143,7 @@ def test_reports_use_active_state_policy_remediation_and_drift(tmp_path: Path) -
         workspace_id=workspace.id,
         asset_id=asset.id,
         values=[_finding(asset.id, asset.name)],
-        completed_at=now,
+        completed_at=now - timedelta(minutes=5),
     )
     remediation.create_from_finding(
         workspace_id=workspace.id,
@@ -143,23 +152,40 @@ def test_reports_use_active_state_policy_remediation_and_drift(tmp_path: Path) -
         owner=None,
         due_date=date(2026, 8, 15),
     )
+    _scan(
+        inventory,
+        findings,
+        continuous,
+        workspace_id=workspace.id,
+        asset_id=asset.id,
+        values=[
+            _finding(asset.id, asset.name),
+            _finding(
+                asset.id,
+                asset.name,
+                algorithm="RSA-1024",
+                key_size=1024,
+            ),
+        ],
+        completed_at=now,
+    )
 
     service = ReportingService(inventory)
     executive = service.executive_report(workspace.id, now=now)
     engineering = service.engineering_report(workspace.id, now=now)
 
     assert executive.summary.assets_total == 1
-    assert executive.summary.active_findings == 1
-    assert executive.summary.severity["critical"] == 1
-    assert executive.summary.quantum["vulnerable"] == 1
-    assert executive.summary.policy["fail"] == 1
+    assert executive.summary.active_findings == 2
+    assert executive.summary.severity["critical"] == 2
+    assert executive.summary.quantum["vulnerable"] == 2
+    assert executive.summary.policy["fail"] == 2
     assert executive.summary.remediation["open"] == 1
     assert executive.summary.overdue_remediation == 1
     assert executive.summary.unowned_remediation == 1
     assert executive.summary.drift_30d["introduced"] == 1
-    assert len(executive.top_priorities) == 1
-    assert engineering.findings[0].evidence_hash
-    assert engineering.findings[0].remediation_status == "open"
+    assert len(executive.top_priorities) == 2
+    assert all(row.evidence_hash for row in engineering.findings)
+    assert any(row.remediation_status == "open" for row in engineering.findings)
     assert engineering.metadata.policy.rules_hash
 
 
@@ -182,7 +208,9 @@ def test_engineering_csv_neutralizes_spreadsheet_formulas(tmp_path: Path) -> Non
     assert "'=HYPERLINK" in csv_export
 
 
-def test_reports_are_tenant_scoped_and_cbom_contains_only_current_state(tmp_path: Path) -> None:
+def test_reports_are_tenant_scoped_and_cbom_contains_only_current_state(
+    tmp_path: Path,
+) -> None:
     inventory, findings, continuous, _, workspace, other, asset = _state(tmp_path)
     _scan(
         inventory,
@@ -214,14 +242,21 @@ def test_reports_are_tenant_scoped_and_cbom_contains_only_current_state(tmp_path
 
 
 def test_executive_html_escapes_workspace_and_asset_text(tmp_path: Path) -> None:
-    inventory, findings, continuous, _, workspace, _, asset = _state(tmp_path)
+    inventory, findings, continuous, _, workspace, _, _ = _state(tmp_path)
+    malicious = inventory.create_asset(
+        workspace_id=workspace.id,
+        name="<script>alert(1)</script>",
+        kind=ManagedAssetKind.TLS_ENDPOINT,
+        locator="malicious-name.example.com:443",
+        context=ScanContext(environment="production"),
+    )
     _scan(
         inventory,
         findings,
         continuous,
         workspace_id=workspace.id,
-        asset_id=asset.id,
-        values=[_finding(asset.id, "<script>alert(1)</script>")],
+        asset_id=malicious.id,
+        values=[_finding(malicious.id, malicious.name)],
         completed_at=datetime(2026, 8, 16, 8, 0, tzinfo=UTC),
     )
 
