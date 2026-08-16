@@ -17,6 +17,8 @@ The `main` branch must be protected with the following repository settings:
   - `postgres-load-soak`
   - `postgres-failure-injection`
   - `container-build`
+  - `codeql-python`
+  - `codeql-javascript-typescript`
 - Do not allow force pushes.
 - Do not allow branch deletion.
 - Apply the rule to administrators where the repository plan/settings allow it.
@@ -26,22 +28,28 @@ The repository treats exact-head CI as a merge invariant even when GitHub-side p
 
 ## CI supply-chain policy
 
-First-party GitHub Actions are pinned to exact commit SHAs. Human-readable release versions are retained as comments in the workflow.
+First-party GitHub Actions and CodeQL actions are pinned to exact commit SHAs. Human-readable release versions are retained as comments in workflows.
 
 When updating an action:
 
-1. inspect the official `actions/*` release;
-2. resolve the exact tag to a commit SHA;
+1. inspect the official release from the action owner;
+2. resolve the exact tag to its commit SHA, dereferencing annotated tags where necessary;
 3. update the workflow SHA and version comment together;
-4. require the complete CryptoHawk CI and container-build matrix on the resulting PR.
+4. require the complete CryptoHawk CI, container-build and CodeQL matrix on the resulting PR.
 
 Do not replace a commit pin with a floating branch or unverified third-party action.
+
+## Security scanning
+
+CodeQL runs security-extended analysis for Python and JavaScript/TypeScript on pull requests, pushes to `main`, and a weekly schedule. Successful analysis is not equivalent to an empty alert set; release review must inspect and disposition open alerts.
+
+Dependency audits and CodeQL complement, but do not replace, an independent security review before GA.
 
 ## Dependency updates
 
 Dependabot is configured for Python, npm and GitHub Actions. Dependency PRs must pass the same security, reliability, container and release-qualification matrix as application changes.
 
-Security-sensitive dependency updates should be reviewed for behavioral changes in cryptography, SSH/TLS, SQL/database, authentication and telemetry boundaries rather than merged solely because the dependency audit is green.
+Security-sensitive dependency updates should be reviewed for behavioral changes in cryptography, SSH/TLS, SQL/database, authentication and telemetry boundaries rather than merged solely because dependency audits are green.
 
 ## Release branches and tags
 
