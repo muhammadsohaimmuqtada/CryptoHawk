@@ -2,6 +2,8 @@ import type {
   CryptoPolicyPackWithVersions,
   CryptoPolicyVersion,
   EffectiveCryptoPolicy,
+  EngineeringReport,
+  ExecutiveReport,
   Finding,
   IssuedToken,
   ManagedAsset,
@@ -49,6 +51,12 @@ export function createClient(token: string, onUnauthorized: () => void) {
     const response = await request(path, options)
     if (!response.ok) return readError(response, fallback)
     return response.json() as Promise<T>
+  }
+
+  async function download(path: string, fallback = 'Download failed') {
+    const response = await request(path)
+    if (!response.ok) return readError(response, fallback)
+    return response.blob()
   }
 
   return {
@@ -122,6 +130,14 @@ export function createClient(token: string, onUnauthorized: () => void) {
         { method: 'POST' },
         'Unable to activate policy version',
       ),
+    executiveReport: (workspaceId: string) =>
+      json<ExecutiveReport>(`/api/v1/workspaces/${workspaceId}/reports/executive`),
+    engineeringReport: (workspaceId: string) =>
+      json<EngineeringReport>(`/api/v1/workspaces/${workspaceId}/reports/engineering`),
+    downloadReport: (
+      workspaceId: string,
+      artifact: 'executive.csv' | 'executive.html' | 'engineering.csv' | 'cbom',
+    ) => download(`/api/v1/workspaces/${workspaceId}/reports/${artifact}`),
     createAsset: (workspaceId: string, body: Record<string, unknown>) =>
       json<ManagedAsset>(
         `/api/v1/workspaces/${workspaceId}/assets`,
