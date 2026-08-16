@@ -87,7 +87,9 @@ def test_builtins_are_deterministic_and_recommended_is_default(
     assert effective.pack.slug == "cryptohawk-recommended"
     assert effective.version.version == 1
     assert len(effective.version.rules_hash) == 64
+    assert len(effective.pack.id) == 32
     assert effective.provenance_ref.startswith(f"policy:{effective.pack.id}@1:")
+    assert len(effective.provenance_ref) <= 80
 
 
 def test_custom_policy_versions_are_immutable_and_tenant_scoped(
@@ -104,6 +106,7 @@ def test_custom_policy_versions_are_immutable_and_tenant_scoped(
         activate=True,
     )
     assert created.active_version == 1
+    assert len(created.versions[0].provenance_ref) <= 80
     first_hash = created.versions[0].rules_hash
 
     version_two = policies.create_version(
