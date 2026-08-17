@@ -33,9 +33,22 @@ def test_oidc_known_good_configuration_passes() -> None:
         ({"oidc_issuer": ""}, "OIDC issuer is required"),
         ({"oidc_client_id": ""}, "OIDC client ID is required"),
         ({"oidc_client_secret": ""}, "OIDC client secret is required"),
-        ({"oidc_redirect_uri": "https://cryptohawk.example.com/wrong"}, "redirect URI path"),
-        ({"oidc_redirect_uri": "https://cryptohawk.example.com/api/v1/auth/oidc/callback?x=1"}, "must not contain a query"),
-        ({"oidc_frontend_url": "https://cryptohawk.example.com/app"}, "must be a plain origin"),
+        (
+            {"oidc_redirect_uri": "https://cryptohawk.example.com/wrong"},
+            "redirect URI path",
+        ),
+        (
+            {
+                "oidc_redirect_uri": (
+                    "https://cryptohawk.example.com/api/v1/auth/oidc/callback?x=1"
+                )
+            },
+            "must not contain a query",
+        ),
+        (
+            {"oidc_frontend_url": "https://cryptohawk.example.com/app"},
+            "must be a plain origin",
+        ),
         ({"oidc_scopes": "openid profile"}, "must include openid and email"),
         ({"oidc_token_endpoint_auth_method": "none"}, "token endpoint auth method"),
         ({"oidc_transaction_ttl_seconds": 30}, "transaction TTL"),
