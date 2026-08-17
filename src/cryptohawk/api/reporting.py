@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from cryptohawk.api.auth import inventory, require_workspace_role
 from cryptohawk.domain.auth import Principal, WorkspaceRole
 from cryptohawk.domain.reporting import EngineeringReport, ExecutiveReport
+from cryptohawk.services.pilot_evidence import PilotEvidenceService
 from cryptohawk.services.reporting import ReportingService
 
 router = APIRouter(
@@ -20,6 +21,10 @@ ViewerPrincipal = Annotated[
 
 def _reports() -> ReportingService:
     return ReportingService(inventory)
+
+
+def _pilot_evidence() -> PilotEvidenceService:
+    return PilotEvidenceService(inventory)
 
 
 def _filename(workspace_id: str, suffix: str) -> str:
@@ -99,3 +104,17 @@ def current_cbom(workspace_id: str, _principal: ViewerPrincipal) -> dict:
         return _reports().current_cbom(workspace_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/pilot-evidence.zip")
+def pilot_evidence_bundle(workspace_id: str, _principal: ViewerPrincipal) -> Response:
+    try:
+        content = _pilot_evidence().build_bundle(workspace_id)
+        filename = _filename(workspace_id, "pilot-evidence.zip")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
