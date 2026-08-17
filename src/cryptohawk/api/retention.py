@@ -5,8 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from cryptohawk.api.auth import inventory, require_workspace_role
-from cryptohawk.api.schemas import WorkspaceDeleteRequest
+from cryptohawk.api.schemas import WorkspaceDeleteRequest, WorkspaceRetentionPolicyRequest
 from cryptohawk.domain.auth import Principal, PrincipalKind, WorkspaceRole
+from cryptohawk.domain.retention import RetentionSweepResult, WorkspaceRetentionPolicy
 from cryptohawk.storage.retention import (
     WorkspacePurgeBlocked,
     WorkspaceRetentionRepository,
@@ -14,10 +15,82 @@ from cryptohawk.storage.retention import (
 
 router = APIRouter()
 retention_repo = WorkspaceRetentionRepository(inventory)
+ViewerPrincipal = Annotated[
+    Principal,
+    Depends(require_workspace_role(WorkspaceRole.VIEWER)),
+]
 OwnerPrincipal = Annotated[
     Principal,
     Depends(require_workspace_role(WorkspaceRole.OWNER)),
 ]
+
+
+def _require_owner_session(principal: Principal) -> str:
+    if principal.kind != PrincipalKind.SESSION or principal.user_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="an owner user session is required for retention changes",
+        )
+    return principal.user_id
+
+
+@router.get(
+    "/api/v1/workspaces/{workspace_id}/retention-policy",
+    response_model=WorkspaceRetentionPolicy,
+)
+def get_retention_policy(
+    workspace_id: str,
+    _principal: ViewerPrincipal,
+) -> WorkspaceRetentionPolicy:
+    try:
+        return retention_repo.get_policy(workspace_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/api/v1/workspaces/{workspace_id}/retention-policy",
+    response_model=WorkspaceRetentionPolicy,
+)
+def set_retention_policy(
+    workspace_id: str,
+    payload: WorkspaceRetentionPolicyRequest,
+    principal: OwnerPrincipal,
+) -> WorkspaceRetentionPolicy:
+    user_id = _require_owner_session(principal)
+    try:
+        return retention_repo.set_policy(
+            workspace_id=workspace_id,
+            enabled=payload.enabled,
+            evidence_retention_days=payload.evidence_retention_days,
+            audit_retention_days=payload.audit_retention_days,
+            sweep_interval_hours=payload.sweep_interval_hours,
+            updated_by=user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/api/v1/workspaces/{workspace_id}/retention-policy/run",
+    response_model=RetentionSweepResult,
+)
+def run_retention_policy(
+    workspace_id: str,
+    principal: OwnerPrincipal,
+) -> RetentionSweepResult:
+    _require_owner_session(principal)
+    try:
+        result = retention_repo.prune_workspace_history(workspace_id=workspace_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=409, detail="retention policy was not run")
+    return result
 
 
 @router.delete(
