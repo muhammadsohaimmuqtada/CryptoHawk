@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     otel_export_timeout_seconds: float = 5.0
     connector_encryption_keys: str = ""
     connector_encryption_active_version: int = 1
+    oidc_enabled: bool = False
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = ""
+    oidc_frontend_url: str = ""
+    oidc_scopes: str = "openid profile email"
+    oidc_token_endpoint_auth_method: str = "client_secret_basic"
+    oidc_require_verified_email: bool = True
+    oidc_transaction_ttl_seconds: int = 600
+    oidc_completion_ttl_seconds: int = 120
+    oidc_http_timeout_seconds: float = 10.0
+    oidc_allow_private_provider: bool = False
     repository_allowed_hosts: str = "github.com,gitlab.com"
     repository_fetch_depth: int = 100
     repository_git_timeout_seconds: int = 120
@@ -62,6 +75,14 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def oidc_scope_list(self) -> list[str]:
+        return [scope.strip() for scope in self.oidc_scopes.split() if scope.strip()]
+
+    @property
+    def oidc_issuer_normalized(self) -> str:
+        return self.oidc_issuer.strip().rstrip("/")
+
+    @property
     def repository_allowed_host_list(self) -> list[str]:
         return [
             host.strip().lower().rstrip(".")
@@ -73,12 +94,111 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment.strip().lower() == "production"
 
+    def _validate_oidc_url(
+        self,
+        value: str,
+        *,
+        label: str,
+        plain_origin: bool = False,
+    ) -> list[str]:
+        parsed = urlsplit(value.strip())
+        if not parsed.scheme or not parsed.hostname:
+            return [f"{label} must be an absolute URL"]
+        errors: list[str] = []
+        if parsed.username or parsed.password or parsed.fragment:
+            errors.append(f"{label} must not contain credentials or a fragment")
+        if plain_origin and (parsed.query or parsed.path not in {"", "/"}):
+            errors.append(f"{label} must be a plain origin")
+        if self.is_production and parsed.scheme.lower() != "https":
+            errors.append(f"{label} must use HTTPS in production")
+        elif parsed.scheme.lower() not in {"http", "https"}:
+            errors.append(f"{label} must use HTTP or HTTPS")
+        hostname = parsed.hostname.lower().rstrip(".")
+        if self.is_production and hostname in {"localhost", "127.0.0.1", "::1"}:
+            errors.append(f"{label} cannot use loopback in production")
+        return errors
+
+    def _connector_key_error(self) -> str | None:
+        if not self.connector_encryption_keys.strip():
+            return "connector encryption keys are required"
+        try:
+            VersionedAesGcmCipher.from_spec(
+                self.connector_encryption_keys,
+                active_version=self.connector_encryption_active_version,
+            )
+        except SecretConfigurationError as exc:
+            return f"invalid connector encryption key configuration: {exc}"
+        return None
+
+    def _oidc_errors(self) -> list[str]:
+        if not self.oidc_enabled:
+            return []
+        errors: list[str] = []
+        issuer = self.oidc_issuer_normalized
+        if not issuer:
+            errors.append("OIDC issuer is required when OIDC is enabled")
+        else:
+            if len(issuer) > 1000:
+                errors.append("OIDC issuer must be at most 1000 characters")
+            errors.extend(self._validate_oidc_url(issuer, label="OIDC issuer"))
+        if not self.oidc_client_id.strip():
+            errors.append("OIDC client ID is required when OIDC is enabled")
+        if not self.oidc_client_secret.strip():
+            errors.append("OIDC client secret is required when OIDC is enabled")
+        if not self.oidc_redirect_uri.strip():
+            errors.append("OIDC redirect URI is required when OIDC is enabled")
+        else:
+            errors.extend(
+                self._validate_oidc_url(
+                    self.oidc_redirect_uri,
+                    label="OIDC redirect URI",
+                )
+            )
+            redirect = urlsplit(self.oidc_redirect_uri.strip())
+            if redirect.query:
+                errors.append("OIDC redirect URI must not contain a query")
+            if redirect.path != "/api/v1/auth/oidc/callback":
+                errors.append("OIDC redirect URI path must be /api/v1/auth/oidc/callback")
+        if not self.oidc_frontend_url.strip():
+            errors.append("OIDC frontend URL is required when OIDC is enabled")
+        else:
+            errors.extend(
+                self._validate_oidc_url(
+                    self.oidc_frontend_url,
+                    label="OIDC frontend URL",
+                    plain_origin=True,
+                )
+            )
+        if not {"openid", "email"}.issubset(set(self.oidc_scope_list)):
+            errors.append("OIDC scopes must include openid and email")
+        if self.oidc_token_endpoint_auth_method not in {
+            "client_secret_basic",
+            "client_secret_post",
+        }:
+            errors.append(
+                "OIDC token endpoint auth method must be client_secret_basic or client_secret_post"
+            )
+        if not 60 <= self.oidc_transaction_ttl_seconds <= 900:
+            errors.append("OIDC transaction TTL must be between 60 and 900 seconds")
+        if not 30 <= self.oidc_completion_ttl_seconds <= 300:
+            errors.append("OIDC completion TTL must be between 30 and 300 seconds")
+        if not 1 <= self.oidc_http_timeout_seconds <= 30:
+            errors.append("OIDC HTTP timeout must be between 1 and 30 seconds")
+        key_error = self._connector_key_error()
+        if key_error:
+            errors.append(f"OIDC requires {key_error}")
+        return errors
+
     def validate_runtime(self) -> None:
-        """Reject production configurations that can silently weaken security or durability."""
+        """Reject configurations that can silently weaken security or durability."""
+        errors = self._oidc_errors()
         if not self.is_production:
+            if errors:
+                raise RuntimeConfigurationError(
+                    f"unsafe runtime configuration: {'; '.join(errors)}"
+                )
             return
 
-        errors: list[str] = []
         database = self.database_url.strip().lower()
         if not database.startswith(("postgresql://", "postgresql+psycopg://")):
             errors.append("production requires PostgreSQL")
