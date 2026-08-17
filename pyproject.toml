@@ -12,7 +12,10 @@ license = {text = "Apache-2.0"}
 authors = [{name = "Muhammad Sohaim Muqtada"}]
 dependencies = [
   "alembic>=1.14,<2",
+  "authlib>=1.7.2,<2",
   "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "joserfc>=1.7.4,<2",
   "uvicorn[standard]>=0.30,<1",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.5,<3",
