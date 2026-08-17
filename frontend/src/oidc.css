@@ -1,0 +1,50 @@
+.oidc-launcher {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 80;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+}
+
+.oidc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(120, 151, 255, 0.32);
+  border-radius: 12px;
+  background: rgba(12, 20, 39, 0.96);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+  color: #eaf0ff;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  backdrop-filter: blur(16px);
+}
+
+.oidc-button:hover {
+  border-color: rgba(142, 171, 255, 0.58);
+  background: rgba(19, 30, 56, 0.98);
+}
+
+.oidc-error {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 128, 128, 0.28);
+  border-radius: 10px;
+  background: rgba(54, 19, 24, 0.94);
+  color: #ffd7d7;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .oidc-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+}
