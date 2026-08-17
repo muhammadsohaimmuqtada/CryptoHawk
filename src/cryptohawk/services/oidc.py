@@ -211,8 +211,11 @@ class OidcService:
             await self._validate_remote_url(endpoint, label)
 
         methods = payload.get("token_endpoint_auth_methods_supported")
-        if isinstance(methods, list) and self.settings.oidc_token_endpoint_auth_method not in methods:
-            raise OidcProviderError("configured OIDC token authentication method is unsupported")
+        configured_method = self.settings.oidc_token_endpoint_auth_method
+        if isinstance(methods, list) and configured_method not in methods:
+            raise OidcProviderError(
+                "configured OIDC token authentication method is unsupported"
+            )
         response_types = payload.get("response_types_supported")
         if isinstance(response_types, list) and "code" not in response_types:
             raise OidcProviderError("OIDC provider does not support Authorization Code flow")
