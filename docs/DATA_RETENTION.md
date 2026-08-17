@@ -1,6 +1,11 @@
 # CryptoHawk Data Retention and Workspace Deletion
 
-CryptoHawk 0.9 provides an explicit, destructive workspace purge for controlled pilot deployments. This is a technical data-lifecycle control; it does not by itself define the contractual retention policy, legal basis, backup schedule, or privacy obligations of a particular deployment.
+CryptoHawk provides two complementary data-lifecycle controls for controlled deployments:
+
+1. an explicit destructive workspace purge; and
+2. an opt-in workspace retention policy for automatic historical evidence and audit expiry.
+
+These are technical controls. They do not by themselves define a customer's contractual retention policy, legal basis, backup schedule, legal holds, privacy notice, or regulatory obligations.
 
 ## Workspace purge
 
@@ -25,7 +30,7 @@ Deletion is allowed only when all of the following are true:
 
 A queued job does not block deletion. Queued work is locked and removed as part of the same database transaction so a PostgreSQL worker cannot claim new work for the workspace while the purge is in progress. A running scan must finish or be cancelled before deletion is attempted again.
 
-## Data removed
+## Data removed by workspace purge
 
 A successful workspace purge removes the tenant's live application state in one transaction, including:
 
@@ -39,12 +44,61 @@ A successful workspace purge removes the tenant's live application state in one 
 - workspace API keys and workspace/API-key rate-limit buckets;
 - remediation/migration items and verification evidence;
 - cryptographic policy packs, immutable policy versions and active assignment;
+- workspace retention-policy configuration;
 - workspace runtime/concurrency state;
 - workspace-scoped audit events.
 
-The deletion graph is explicit rather than relying only on database cascades. This keeps the behavior deterministic in both production PostgreSQL and local SQLite environments and makes new workspace-owned tables visible during code review.
+The deletion graph is explicit rather than relying only on database cascades. This keeps behavior deterministic in both production PostgreSQL and local SQLite environments and makes new workspace-owned tables visible during code review.
 
-## Data intentionally retained
+## Configurable historical retention
+
+Retention is **disabled by default**. Enabling it is an explicit owner decision.
+
+The API exposes:
+
+```text
+GET  /api/v1/workspaces/{workspace_id}/retention-policy
+POST /api/v1/workspaces/{workspace_id}/retention-policy
+POST /api/v1/workspaces/{workspace_id}/retention-policy/run
+```
+
+A configured policy contains:
+
+- `enabled`;
+- `evidence_retention_days` — 7 to 3650 days;
+- `audit_retention_days` — 7 to 3650 days;
+- `sweep_interval_hours` — 1 to 168 hours;
+- last-run and updater provenance.
+
+Viewers can read the policy. Only an `owner` user session can change it or force an immediate sweep. API keys cannot change retention policy.
+
+When the durable CryptoHawk scheduler is running, it also executes due retention policies. Multiple scheduler processes use row locking so a workspace policy is not intentionally swept concurrently.
+
+### Evidence-aware safety rules
+
+Timed retention is not a blind age-based delete. CryptoHawk protects evidence that is still operationally required even when it is older than the configured cutoff.
+
+The sweep always protects:
+
+- the newest scan snapshot for each asset;
+- the newest repository scan provenance for each repository asset, preserving incremental-collection continuity;
+- the last scan job for every currently active cryptographic observation;
+- source and verification scan jobs required by unfinished remediation work.
+
+After those protections are calculated, eligible old data can be removed, including:
+
+- observation occurrences;
+- cryptographic drift events;
+- old scan snapshots;
+- old scheduled-execution records;
+- superseded repository scan provenance;
+- resolved/stale findings that are no longer referenced by retained observations or remediation;
+- terminal scan jobs that are no longer referenced by findings or remediation;
+- workspace audit events older than the audit cutoff.
+
+`observation_states` are retained because they carry compact continuous-state identity required to distinguish current cryptographic posture and future drift. Current findings/evidence and unfinished remediation provenance therefore survive normal age-based cleanup.
+
+## Data intentionally retained after full workspace purge
 
 A workspace purge does **not** delete global user identities or user login sessions. A user may belong to more than one workspace, so deleting one tenant must not remove access to an unrelated tenant.
 
@@ -54,32 +108,35 @@ If account-level deletion is required by a deployment's privacy policy, it must 
 
 ## Backups and external copies
 
-Deleting a workspace from the live database does not rewrite historical PostgreSQL backups, snapshots, object-store copies, exported CBOMs/reports, SIEM copies, or other externally retained artifacts.
+Deleting or aging data from the live database does not rewrite historical PostgreSQL backups, snapshots, object-store copies, exported CBOMs/reports, SIEM copies, or other externally retained artifacts.
 
 Operators must define and enforce backup expiration and deletion schedules that match their contractual and regulatory requirements. CryptoHawk's disaster-recovery procedure validates recoverability; it is not a backup-retention policy.
 
-## Retention policy
+## Operational policy still required
 
-CryptoHawk does not automatically purge historical evidence on a timer in the 0.9 pilot line. Evidence retention requirements vary by customer, incident-response policy and regulatory regime, so pilot operators must explicitly decide:
+Deployment owners must still explicitly decide:
 
-- how long active and historical scan evidence is retained;
-- how long workspace audit records are retained;
+- the retention periods appropriate for scan evidence and audit records;
 - how long database backups and exported reports are retained;
 - whether legal/security holds override normal deletion;
-- when account-level identity deletion is permitted.
+- when account-level identity deletion is permitted;
+- whether a customer contract or regulation requires longer evidence retention than the configured minimum.
 
-Broad GA should pair these technical controls with a documented commercial retention/privacy policy and, where required, configurable time-based retention.
+Broad GA should pair these technical controls with the deployment's commercial privacy/retention policy and legal review where applicable.
 
 ## Verification expectations
 
-Release tests for workspace purge must prove that:
+Release tests for lifecycle controls must prove that:
 
-- a non-owner cannot delete the workspace;
-- an API key cannot perform workspace deletion even when it has a high workspace role;
-- an incorrect confirmation slug is rejected;
-- running scans block deletion;
-- queued work and tenant evidence are removed transactionally;
-- encrypted credentials, policy history, remediation state and audit data are removed;
+- a non-owner cannot delete the workspace or mutate retention policy;
+- an API key cannot perform workspace deletion or retention-policy changes;
+- an incorrect workspace-deletion confirmation slug is rejected;
+- running scans block full workspace deletion;
+- queued work and tenant evidence are removed transactionally during full purge;
+- encrypted credentials, policy history, remediation state and audit data are removed during full purge;
 - a neighboring workspace remains intact;
 - global user identity/session state remains intact;
-- the successful deletion audit is workspace-less and does not recreate tenant data.
+- the successful workspace-deletion audit is workspace-less and does not recreate tenant data;
+- timed retention removes eligible old history but preserves latest/current evidence;
+- scheduler cadence prevents unnecessary repeated sweeps;
+- production PostgreSQL migrations and retention execution are release-qualified.

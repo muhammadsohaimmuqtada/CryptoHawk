@@ -28,6 +28,7 @@ from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.policy import PolicyRepository
 from cryptohawk.storage.queue import ScanQueueRepository
 from cryptohawk.storage.quotas import QuotaRepository
+from cryptohawk.storage.retention import WorkspaceRetentionRepository
 
 
 def _print(findings) -> None:
@@ -174,11 +175,13 @@ def main() -> None:
         queue = ScanQueueRepository(inventory, quota)
         continuous = ContinuousRepository(inventory)
         policies = PolicyRepository(inventory)
+        retention = WorkspaceRetentionRepository(inventory)
         if settings.auto_create_schema:
             quota.create_schema()
             queue.create_schema()
             continuous.create_schema()
             policies.create_schema()
+            retention.create_schema()
         executor = AssetScanExecutor(
             risk_engine=engine,
             source_scanner=SourceScanner(),
@@ -220,6 +223,7 @@ def main() -> None:
                     poll_interval=args.poll_interval,
                     batch_size=args.batch_size,
                 ),
+                retention=retention,
             )
             if args.once:
                 runner.run_once()

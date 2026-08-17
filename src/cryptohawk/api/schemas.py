@@ -66,6 +66,13 @@ class WorkspaceDeleteRequest(BaseModel):
     )
 
 
+class WorkspaceRetentionPolicyRequest(BaseModel):
+    enabled: bool = False
+    evidence_retention_days: int = Field(default=180, ge=7, le=3650)
+    audit_retention_days: int = Field(default=365, ge=7, le=3650)
+    sweep_interval_hours: int = Field(default=24, ge=1, le=168)
+
+
 class MemberCreateRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     display_name: str = Field(min_length=1, max_length=200)
