@@ -53,7 +53,6 @@ class OidcProviderMetadata:
 @dataclass(frozen=True)
 class OidcAuthorizationStart:
     authorization_url: str
-    browser_binding: str
 
 
 class OidcService:
@@ -65,12 +64,13 @@ class OidcService:
     def enabled(self) -> bool:
         return self.settings.oidc_enabled
 
-    async def begin_authorization(self) -> OidcAuthorizationStart:
+    async def begin_authorization(self, *, browser_binding: str) -> OidcAuthorizationStart:
         self._require_enabled()
+        if not browser_binding:
+            raise ValueError("OIDC browser binding is required")
         metadata = await self._discovery()
         state = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
-        browser_binding = secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
 
         async with AsyncOAuth2Client(
@@ -98,10 +98,7 @@ class OidcService:
             nonce=nonce,
             ttl_seconds=self.settings.oidc_transaction_ttl_seconds,
         )
-        return OidcAuthorizationStart(
-            authorization_url=authorization_url,
-            browser_binding=browser_binding,
-        )
+        return OidcAuthorizationStart(authorization_url=authorization_url)
 
     async def complete_authorization(
         self,
