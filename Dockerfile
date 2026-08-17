@@ -8,7 +8,10 @@ WORKDIR /app
 COPY pyproject.toml README.md alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
-RUN pip install --no-cache-dir . \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir . \
     && groupadd --system cryptohawk \
     && useradd --system --gid cryptohawk --create-home cryptohawk \
     && chown -R cryptohawk:cryptohawk /app
