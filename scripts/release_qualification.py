@@ -11,6 +11,7 @@ from cryptohawk.storage.database import FindingRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.policy import PolicyRepository
 from cryptohawk.storage.remediation import RemediationRepository
+from cryptohawk.storage.retention import WorkspaceRetentionRepository
 
 
 class _UnusedRepositoryScanner:
@@ -127,12 +128,19 @@ def main() -> None:
     if not all(snapshot.policy_version == effective.provenance_ref for snapshot in history):
         raise AssertionError("scan history did not retain the exact policy provenance")
 
+    purge = WorkspaceRetentionRepository(inventory).purge_workspace(workspace.id)
+    if purge.workspace_id != workspace.id or inventory.get_workspace(workspace.id) is not None:
+        raise AssertionError("workspace purge did not remove the qualified tenant on PostgreSQL")
+    if findings.list_findings(workspace_id=workspace.id):
+        raise AssertionError("workspace purge left scoped findings behind on PostgreSQL")
+
     print(
         "release qualification passed:",
         f"workspace={workspace.id}",
         f"source_job={source_job.id}",
         f"verification_job={verification_job.id}",
         f"policy={effective.provenance_ref}",
+        "workspace_purged=true",
     )
 
 

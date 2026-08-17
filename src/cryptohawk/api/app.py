@@ -20,6 +20,7 @@ from cryptohawk.api.continuous import router as continuous_router
 from cryptohawk.api.credentials import initialize_connector_credentials
 from cryptohawk.api.credentials import router as credential_router
 from cryptohawk.api.middleware import SecurityAuditMiddleware, audit_repo
+from cryptohawk.api.retention import router as retention_router
 from cryptohawk.api.schemas import (
     ApiKeyCreateRequest,
     AssetCreateRequest,
@@ -108,6 +109,7 @@ app = FastAPI(
 )
 app.include_router(continuous_router)
 app.include_router(credential_router)
+app.include_router(retention_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
