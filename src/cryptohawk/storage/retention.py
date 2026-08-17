@@ -263,6 +263,8 @@ class WorkspaceRetentionRepository:
             )
             policy = session.scalar(statement)
             if policy is None:
+                if only_if_due:
+                    return None
                 if self.inventory.get_workspace(workspace_id) is None:
                     raise LookupError("workspace not found")
                 raise ValueError("workspace retention policy has not been configured")
