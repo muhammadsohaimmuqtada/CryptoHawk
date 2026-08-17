@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 from datetime import UTC, datetime, timedelta
@@ -64,15 +65,14 @@ async def _metadata() -> OidcProviderMetadata:
     )
 
 
-@pytest.mark.asyncio
-async def test_authorization_start_uses_pkce_s256_state_nonce_and_server_storage(
+def test_authorization_start_uses_pkce_s256_state_nonce_and_server_storage(
     monkeypatch,
 ) -> None:
     repository = _Repository()
     service = OidcService(_settings(), repository)  # type: ignore[arg-type]
     monkeypatch.setattr(service, '_discovery', _metadata)
 
-    started = await service.begin_authorization()
+    started = asyncio.run(service.begin_authorization())
     assert repository.login is not None
     query = parse_qs(urlsplit(started.authorization_url).query)
     assert query['response_type'] == ['code']
@@ -84,15 +84,15 @@ async def test_authorization_start_uses_pkce_s256_state_nonce_and_server_storage
     assert started.browser_binding == repository.login['browser_binding']
 
     verifier = repository.login['code_verifier']
-    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
+    digest = hashlib.sha256(verifier.encode()).digest()
+    expected = base64.urlsafe_b64encode(digest).decode().rstrip('=')
     assert query['code_challenge'] == [expected]
 
 
-@pytest.mark.asyncio
-async def test_id_token_validation_rejects_wrong_audience_and_nonce(monkeypatch) -> None:
+def test_id_token_validation_rejects_wrong_audience_and_nonce(monkeypatch) -> None:
     repository = _Repository()
     service = OidcService(_settings(), repository)  # type: ignore[arg-type]
-    metadata = await _metadata()
+    metadata = asyncio.run(_metadata())
     now = datetime.now(UTC)
 
     async def fake_jwks(_metadata):
@@ -116,29 +116,35 @@ async def test_id_token_validation_rejects_wrong_audience_and_nonce(monkeypatch)
         lambda *_args, **_kwargs: SimpleNamespace(claims=claims, header={'alg': 'RS256'}),
     )
     with pytest.raises(PermissionError, match='ID token validation'):
-        await service._validate_id_token(
-            'token',
-            metadata=metadata,
-            nonce='expected-nonce',
-            access_token=None,
+        asyncio.run(
+            service._validate_id_token(
+                'token',
+                metadata=metadata,
+                nonce='expected-nonce',
+                access_token=None,
+            )
         )
 
     claims['aud'] = 'cryptohawk-client'
     claims['nonce'] = 'wrong-nonce'
     with pytest.raises(PermissionError, match='ID token validation'):
-        await service._validate_id_token(
+        asyncio.run(
+            service._validate_id_token(
+                'token',
+                metadata=metadata,
+                nonce='expected-nonce',
+                access_token=None,
+            )
+        )
+
+    claims['nonce'] = 'expected-nonce'
+    validated = asyncio.run(
+        service._validate_id_token(
             'token',
             metadata=metadata,
             nonce='expected-nonce',
             access_token=None,
         )
-
-    claims['nonce'] = 'expected-nonce'
-    validated = await service._validate_id_token(
-        'token',
-        metadata=metadata,
-        nonce='expected-nonce',
-        access_token=None,
     )
     assert validated['sub'] == 'subject-1'
 
