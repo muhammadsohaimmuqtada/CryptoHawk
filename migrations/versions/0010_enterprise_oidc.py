@@ -20,6 +20,7 @@ def upgrade() -> None:
     op.create_table(
         "oidc_identities",
         sa.Column("id", sa.String(length=64), nullable=False),
+        sa.Column("issuer_hash", sa.String(length=64), nullable=False),
         sa.Column("issuer", sa.String(length=1000), nullable=False),
         sa.Column("subject", sa.String(length=255), nullable=False),
         sa.Column("user_id", sa.String(length=64), nullable=False),
@@ -28,10 +29,22 @@ def upgrade() -> None:
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("issuer", "subject", name="uq_oidc_identity_issuer_subject"),
-        sa.UniqueConstraint("issuer", "user_id", name="uq_oidc_identity_issuer_user"),
+        sa.UniqueConstraint(
+            "issuer_hash",
+            "subject",
+            name="uq_oidc_identity_issuer_subject",
+        ),
+        sa.UniqueConstraint(
+            "issuer_hash",
+            "user_id",
+            name="uq_oidc_identity_issuer_user",
+        ),
     )
-    op.create_index("ix_oidc_identities_issuer", "oidc_identities", ["issuer"])
+    op.create_index(
+        "ix_oidc_identities_issuer_hash",
+        "oidc_identities",
+        ["issuer_hash"],
+    )
     op.create_index("ix_oidc_identities_subject", "oidc_identities", ["subject"])
     op.create_index("ix_oidc_identities_user_id", "oidc_identities", ["user_id"])
     op.create_index("ix_oidc_identities_created_at", "oidc_identities", ["created_at"])
@@ -144,5 +157,5 @@ def downgrade() -> None:
     op.drop_index("ix_oidc_identities_created_at", table_name="oidc_identities")
     op.drop_index("ix_oidc_identities_user_id", table_name="oidc_identities")
     op.drop_index("ix_oidc_identities_subject", table_name="oidc_identities")
-    op.drop_index("ix_oidc_identities_issuer", table_name="oidc_identities")
+    op.drop_index("ix_oidc_identities_issuer_hash", table_name="oidc_identities")
     op.drop_table("oidc_identities")
