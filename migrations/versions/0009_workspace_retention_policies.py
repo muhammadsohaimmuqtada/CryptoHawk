@@ -56,9 +56,18 @@ def upgrade() -> None:
         "workspace_retention_policies",
         ["last_run_at"],
     )
+    op.create_index(
+        "ix_workspace_retention_policies_updated_at",
+        "workspace_retention_policies",
+        ["updated_at"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_workspace_retention_policies_updated_at",
+        table_name="workspace_retention_policies",
+    )
     op.drop_index(
         "ix_workspace_retention_policies_last_run_at",
         table_name="workspace_retention_policies",
