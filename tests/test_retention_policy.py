@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+import pytest
 
 from cryptohawk.domain.inventory import ManagedAssetKind, ScanStatus
 from cryptohawk.domain.models import ScanContext
@@ -354,6 +354,23 @@ def test_due_retention_obeys_policy_interval_and_purge_removes_policy(tmp_path: 
     retention.purge_workspace(workspace.id)
     with inventory.SessionLocal() as session:
         assert session.get(WorkspaceRetentionPolicyRecord, workspace.id) is None
+
+
+def test_scheduler_skip_path_does_not_treat_unavailable_policy_as_failure(
+    tmp_path: Path,
+) -> None:
+    inventory, retention = _repo(tmp_path)
+    workspace = inventory.create_workspace(name="Acme")
+
+    assert (
+        retention.prune_workspace_history(
+            workspace_id=workspace.id,
+            only_if_due=True,
+        )
+        is None
+    )
+    with pytest.raises(ValueError, match="has not been configured"):
+        retention.prune_workspace_history(workspace_id=workspace.id)
 
 
 def test_retention_is_disabled_until_owner_configures_it(tmp_path: Path) -> None:
