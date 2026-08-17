@@ -5,7 +5,16 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint, delete, select
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    delete,
+    select,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,12 +33,21 @@ def _digest(value: str) -> str:
 class OidcIdentityRecord(Base):
     __tablename__ = "oidc_identities"
     __table_args__ = (
-        UniqueConstraint("issuer", "subject", name="uq_oidc_identity_issuer_subject"),
-        UniqueConstraint("issuer", "user_id", name="uq_oidc_identity_issuer_user"),
+        UniqueConstraint(
+            "issuer_hash",
+            "subject",
+            name="uq_oidc_identity_issuer_subject",
+        ),
+        UniqueConstraint(
+            "issuer_hash",
+            "user_id",
+            name="uq_oidc_identity_issuer_user",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    issuer: Mapped[str] = mapped_column(String(1000), index=True)
+    issuer_hash: Mapped[str] = mapped_column(String(64), index=True)
+    issuer: Mapped[str] = mapped_column(String(1000))
     subject: Mapped[str] = mapped_column(String(255), index=True)
     user_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True
@@ -171,14 +189,17 @@ class OidcRepository:
     ) -> str:
         current = now or datetime.now(UTC)
         normalized_email = email.strip().lower()
+        issuer_hash = _digest(issuer)
         with self.SessionLocal() as session:
             identity = session.scalar(
                 select(OidcIdentityRecord).where(
-                    OidcIdentityRecord.issuer == issuer,
+                    OidcIdentityRecord.issuer_hash == issuer_hash,
                     OidcIdentityRecord.subject == subject,
                 )
             )
             if identity is not None:
+                if not secrets.compare_digest(identity.issuer, issuer):
+                    raise PermissionError("OIDC issuer identity collision")
                 user = session.get(UserRecord, identity.user_id)
                 if user is None or not user.active:
                     raise PermissionError("linked CryptoHawk user is inactive")
@@ -191,7 +212,7 @@ class OidcRepository:
                 raise PermissionError("SSO identity is not provisioned in CryptoHawk")
             existing_link = session.scalar(
                 select(OidcIdentityRecord).where(
-                    OidcIdentityRecord.issuer == issuer,
+                    OidcIdentityRecord.issuer_hash == issuer_hash,
                     OidcIdentityRecord.user_id == user.id,
                 )
             )
@@ -201,6 +222,7 @@ class OidcRepository:
             session.add(
                 OidcIdentityRecord(
                     id=secrets.token_hex(16),
+                    issuer_hash=issuer_hash,
                     issuer=issuer,
                     subject=subject,
                     user_id=user.id,
@@ -215,11 +237,15 @@ class OidcRepository:
                 session.rollback()
                 resolved = session.scalar(
                     select(OidcIdentityRecord).where(
-                        OidcIdentityRecord.issuer == issuer,
+                        OidcIdentityRecord.issuer_hash == issuer_hash,
                         OidcIdentityRecord.subject == subject,
                     )
                 )
-                if resolved is not None and resolved.user_id == user.id:
+                if (
+                    resolved is not None
+                    and secrets.compare_digest(resolved.issuer, issuer)
+                    and resolved.user_id == user.id
+                ):
                     return user.id
                 raise PermissionError("OIDC identity link conflict") from exc
             return user.id
