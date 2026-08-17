@@ -220,7 +220,7 @@ def seed() -> None:
     print(
         "evaluation seed ready:",
         f"workspace={workspace['slug']}",
-        f"assets=2",
+        "assets=2",
         f"findings={len(findings)}",
     )
 
