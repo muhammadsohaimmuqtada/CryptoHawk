@@ -343,15 +343,18 @@ class AuthRepository:
                     created_at=workspace.created_at,
                 )
             )
-            session.add(
-                WorkspaceMembershipRecord(
-                    workspace_id=workspace.id,
-                    user_id=principal.user_id,
-                    role=WorkspaceRole.OWNER.value,
-                    created_at=workspace.created_at,
-                )
-            )
             try:
+                # Membership uses scalar foreign-key IDs rather than an ORM relationship.
+                # Flush the workspace first so strict databases never see the child row first.
+                session.flush()
+                session.add(
+                    WorkspaceMembershipRecord(
+                        workspace_id=workspace.id,
+                        user_id=principal.user_id,
+                        role=WorkspaceRole.OWNER.value,
+                        created_at=workspace.created_at,
+                    )
+                )
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()

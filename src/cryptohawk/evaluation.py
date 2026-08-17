@@ -248,6 +248,30 @@ def smoke() -> None:
         raise RuntimeError("evaluation workspace is missing")
     workspace_id = workspace["id"]
 
+    probe_slug = "evaluation-workspace-create-probe"
+    probe = _request(
+        web_url,
+        "POST",
+        "/api/v1/workspaces",
+        token=token,
+        payload={"name": "Evaluation Workspace Create Probe", "slug": probe_slug},
+    )
+    if probe.get("slug") != probe_slug:
+        raise RuntimeError("secondary workspace creation returned an unexpected workspace")
+    listed = _request(web_url, "GET", "/api/v1/workspaces", token=token)
+    if not any(item["id"] == probe["id"] for item in listed):
+        raise RuntimeError("newly created workspace is not visible to its owner")
+    _request(
+        web_url,
+        "DELETE",
+        f"/api/v1/workspaces/{probe['id']}",
+        token=token,
+        payload={"confirm_slug": probe_slug},
+    )
+    listed_after_delete = _request(web_url, "GET", "/api/v1/workspaces", token=token)
+    if any(item["id"] == probe["id"] for item in listed_after_delete):
+        raise RuntimeError("workspace creation probe could not be deleted cleanly")
+
     assets = _request(
         web_url,
         "GET",
@@ -296,6 +320,7 @@ def smoke() -> None:
         f"workspace={workspace['slug']}",
         f"assets={len(assets)}",
         f"findings={len(findings)}",
+        "workspace-create=ok",
         "reports=ok",
         "cbom=1.7",
         "web=ok",
