@@ -18,7 +18,7 @@ class OidcTransactionCipher:
         self._cipher = cipher
 
     @classmethod
-    def from_spec(cls, spec: str, *, active_version: int) -> "OidcTransactionCipher":
+    def from_spec(cls, spec: str, *, active_version: int) -> OidcTransactionCipher:
         return cls(VersionedAesGcmCipher.from_spec(spec, active_version=active_version))
 
     def encrypt(self, secret: OidcTransactionSecret, *, transaction_id: str) -> EncryptedSecret:
