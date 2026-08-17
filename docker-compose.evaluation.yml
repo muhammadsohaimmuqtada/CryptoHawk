@@ -1,0 +1,123 @@
+name: cryptohawk-evaluation
+
+x-app-env: &app-env
+  CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-eval@db:5432/cryptohawk_eval
+  CRYPTOHAWK_AUTO_CREATE_SCHEMA: "false"
+  CRYPTOHAWK_CORS_ORIGINS: http://localhost:3000
+
+x-eval-env: &eval-env
+  CRYPTOHAWK_EVALUATION_MODE: "true"
+  CRYPTOHAWK_EVALUATION_API_URL: http://api:8000
+  CRYPTOHAWK_EVALUATION_WEB_URL: http://web:8080
+  CRYPTOHAWK_EVALUATION_EMAIL: tester@cryptohawk.local
+  CRYPTOHAWK_EVALUATION_PASSWORD: CryptoHawk-Eval-Only-2026!
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cryptohawk_eval
+      POSTGRES_USER: cryptohawk
+      POSTGRES_PASSWORD: cryptohawk-eval
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptohawk -d cryptohawk_eval"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - cryptohawk-evaluation-db:/var/lib/postgresql/data
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    build: .
+    command:
+      - cryptohawk
+      - worker
+      - --worker-id
+      - evaluation-worker
+      - --lease-seconds
+      - "60"
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command:
+      - cryptohawk
+      - scheduler
+      - --poll-interval
+      - "5"
+      - --batch-size
+      - "100"
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  seed:
+    build: .
+    command: ["python", "-m", "cryptohawk.evaluation", "seed"]
+    environment:
+      <<: [*app-env, *eval-env]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3000:8080"
+
+  smoke:
+    build: .
+    command: ["python", "-m", "cryptohawk.evaluation", "smoke"]
+    environment:
+      <<: [*app-env, *eval-env]
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      web:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  cryptohawk-evaluation-db:
