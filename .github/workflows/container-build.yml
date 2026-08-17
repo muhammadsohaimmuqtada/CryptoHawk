@@ -2,6 +2,7 @@ name: Container Build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -10,7 +11,7 @@ permissions:
 jobs:
   container-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CRYPTOHAWK_POSTGRES_PASSWORD: cryptohawk-container-ci
       CRYPTOHAWK_DATABASE_URL: postgresql+psycopg://cryptohawk:cryptohawk-container-ci@db:5432/cryptohawk
@@ -19,6 +20,15 @@ jobs:
       CRYPTOHAWK_CORS_ORIGINS: https://cryptohawk.example.invalid
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve release identity
+        run: |
+          version="$(awk -F'"' '/^version = / {print $2; exit}' pyproject.toml)"
+          test -n "$version"
+          echo "CRYPTOHAWK_VERSION=$version" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+      - name: Validate release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "$GITHUB_REF_NAME" = "v${CRYPTOHAWK_VERSION}"
       - name: Validate production Compose rendering
         run: docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
       - name: Build backend image
@@ -47,4 +57,110 @@ jobs:
             cryptohawk-web:ci \
             nginx -t
       - name: Validate backend runtime package
-        run: docker run --rm cryptohawk-api:ci python -c 'import cryptohawk; assert cryptohawk.__version__ == "0.9.0"'
+        run: |
+          docker run --rm \
+            -e EXPECTED_VERSION="$CRYPTOHAWK_VERSION" \
+            cryptohawk-api:ci \
+            python -c 'import os, cryptohawk; assert cryptohawk.__version__ == os.environ["EXPECTED_VERSION"]'
+      - name: Build portable release artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            -v "$PWD:/src" \
+            -w /src \
+            python:3.13-slim \
+            python -m pip wheel --no-deps --wheel-dir /src/release .
+          test -f "release/cryptohawk-${CRYPTOHAWK_VERSION}-py3-none-any.whl"
+
+          web_container="$(docker create cryptohawk-web:ci)"
+          cleanup_web() {
+            docker rm -f "$web_container" >/dev/null 2>&1 || true
+            rm -rf release/web-root
+          }
+          trap cleanup_web EXIT
+          mkdir -p release/web-root
+          docker cp "$web_container:/usr/share/nginx/html/." release/web-root/
+          docker rm "$web_container"
+          web_container=""
+          tar \
+            --sort=name \
+            --mtime="@$SOURCE_DATE_EPOCH" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -cf - \
+            -C release/web-root . \
+            | gzip -n > "release/cryptohawk-web-${CRYPTOHAWK_VERSION}.tar.gz"
+          rm -rf release/web-root
+          trap - EXIT
+
+          git archive \
+            --format=tar \
+            --prefix="cryptohawk-${CRYPTOHAWK_VERSION}/" \
+            HEAD \
+            | gzip -n > "release/cryptohawk-source-${CRYPTOHAWK_VERSION}.tar.gz"
+      - name: Generate backend image CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: cryptohawk-api:ci
+          format: cyclonedx-json
+          output-file: release/cryptohawk-api-${{ env.CRYPTOHAWK_VERSION }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate web image CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: cryptohawk-web:ci
+          format: cyclonedx-json
+          output-file: release/cryptohawk-web-${{ env.CRYPTOHAWK_VERSION }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Validate SBOMs and build checksum manifest
+        run: |
+          set -euo pipefail
+          jq -e '.bomFormat == "CycloneDX" and (.components | type == "array")' \
+            "release/cryptohawk-api-${CRYPTOHAWK_VERSION}.cdx.json" >/dev/null
+          jq -e '.bomFormat == "CycloneDX" and (.components | type == "array")' \
+            "release/cryptohawk-web-${CRYPTOHAWK_VERSION}.cdx.json" >/dev/null
+          (
+            cd release
+            LC_ALL=C sha256sum cryptohawk-* > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+      - name: Upload release candidate bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cryptohawk-release-${{ github.sha }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  release-provenance:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: container-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download exact build bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cryptohawk-release-${{ github.sha }}
+          path: release
+      - name: Verify build bundle checksums
+        run: (cd release && sha256sum -c SHA256SUMS)
+      - name: Attest release build provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-checksums: release/SHA256SUMS

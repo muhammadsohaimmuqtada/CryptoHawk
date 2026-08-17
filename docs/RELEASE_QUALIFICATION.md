@@ -24,6 +24,8 @@ The repository workflows must pass all of these jobs:
    - current-state executive/engineering reporting
    - current-state CycloneDX CBOM
    - exact policy provenance across both scans
+   - configured evidence retention expires old history while preserving the newest proof
+   - full workspace purge succeeds against the production foreign-key graph
 4. `postgres-dr`
    - custom-format backup and checksum
    - clean restore
@@ -47,6 +49,11 @@ The repository workflows must pass all of these jobs:
    - web image runs as the non-root `nginx` user on an unprivileged port
    - nginx configuration validates at runtime
    - backend image exposes the expected CryptoHawk release version
+   - package version must match a `v*` release tag when the workflow is tag-triggered
+   - a backend wheel, deterministic web archive and source archive are produced
+   - CycloneDX JSON SBOMs are generated from both built runtime images
+   - every portable release artifact is covered by a SHA-256 checksum manifest
+   - the exact bundle is uploaded as a workflow artifact for review
 8. `codeql-python` and `codeql-javascript-typescript`
    - GitHub CodeQL security-extended analysis runs on backend and frontend code
    - the action is pinned to the reviewed v4.37.7 release commit
@@ -54,6 +61,21 @@ The repository workflows must pass all of these jobs:
 No required job may be skipped or converted to allow-failure for a release candidate.
 
 A green CodeQL job means analysis completed successfully; it does not mean the alert set is empty. Open CodeQL alerts must be reviewed during the manual release review and either fixed or explicitly dispositioned before a pilot release is tagged.
+
+## Build provenance attestations
+
+On a protected `main` push or a `v*` tag push, the successful `container-build` job is followed by `release-provenance`. This job downloads the exact artifact bundle produced by the build job, re-verifies `SHA256SUMS`, and creates a signed GitHub artifact attestation for every subject in that checksum manifest.
+
+The attestation uses GitHub OIDC and Sigstore-backed signing through the pinned `actions/attest` action. Write-capable `id-token`, `attestations`, and `artifact-metadata` permissions exist only on the post-build provenance job; pull-request build jobs retain read-only repository permissions.
+
+For a downloaded artifact from this public repository, verify provenance with GitHub CLI before distribution:
+
+```bash
+gh attestation verify <artifact-path> --repo muhammadsohaimmuqtada/CryptoHawk
+sha256sum -c SHA256SUMS
+```
+
+The provenance covers the portable release bundle and its SBOMs. The current 0.9 workflow does not publish container images to a registry; therefore it does not claim registry-level image provenance. If CryptoHawk later publishes GHCR or another registry image as a supported distribution channel, the pushed image digest must receive its own registry-verifiable attestation before GA.
 
 ## Production configuration gate
 
@@ -79,7 +101,9 @@ A release must demonstrate:
 - remediation cannot become Verified except through that later scan;
 - active reports contain no resolved exposure;
 - the current-state CBOM contains no resolved exposure;
-- scan history retains identical policy provenance for both scans.
+- scan history retains identical policy provenance for both scans;
+- timed retention removes eligible historical evidence without deleting the newest verification proof;
+- workspace deletion removes the tenant cleanly on PostgreSQL after the proof is complete.
 
 ## Manual release review
 
@@ -91,6 +115,9 @@ Before labeling a commit as a pilot release:
 - review migration changes and downgrade/restore strategy;
 - verify no secrets, runtime databases or target artifacts are committed;
 - confirm backend/web images run non-root and were built by the candidate SHA;
+- download the release bundle and verify `SHA256SUMS`;
+- verify each distributed artifact's GitHub attestation before publishing it outside the workflow;
+- inspect both CycloneDX runtime-image SBOMs for the candidate build;
 - confirm README/status language says commercial-pilot candidate, not GA;
 - confirm `docs/MARKET_READINESS.md` still distinguishes repository P0 completion from real-world pilot evidence;
 - confirm production deployment configuration uses the runbook in `docs/PRODUCTION_DEPLOYMENT.md`.
@@ -102,9 +129,9 @@ Repository qualification is necessary but not sufficient for broad enterprise GA
 - representative real customer/design-partner pilot evidence across multiple collector classes;
 - an independent application/security review or penetration test with findings closed;
 - deployment-specific HA/DR validation where HA is promised;
-- documented retention/deletion/privacy obligations for the intended commercial model;
+- documented commercial privacy/legal obligations for the intended deployment model;
 - SSO/SAML/OIDC if required by target enterprise customers;
-- signed/reproducible release and container-image provenance appropriate to the distribution channel;
+- registry-level signed provenance if container images become a supported published distribution channel;
 - customer support, incident-response and SLA operating procedures.
 
 Until those are complete, the correct claim is **CryptoHawk 0.9 — commercial-pilot candidate**.
