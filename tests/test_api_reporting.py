@@ -1,4 +1,8 @@
+import hashlib
+import json
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
@@ -120,6 +124,36 @@ def test_viewer_can_export_reports_but_cannot_cross_workspace(tmp_path: Path, mo
     assert cbom.status_code == 200
     assert cbom.json()["specVersion"] == "1.7"
 
+    bundle = client.get(
+        f"/api/v1/workspaces/{workspace_id}/reports/pilot-evidence.zip",
+        headers=_bearer(viewer_token),
+    )
+    assert bundle.status_code == 200
+    assert bundle.headers["content-type"].startswith("application/zip")
+    assert "pilot-evidence.zip" in bundle.headers["content-disposition"]
+
+    with ZipFile(BytesIO(bundle.content)) as archive:
+        assert set(archive.namelist()) == {
+            "manifest.json",
+            "executive.json",
+            "engineering.json",
+            "executive.csv",
+            "engineering.csv",
+            "executive.html",
+            "cbom.cdx.json",
+        }
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["schema"] == "cryptohawk-pilot-evidence/v1"
+        assert manifest["workspace"]["id"] == workspace_id
+        assert "does not certify" in manifest["disclaimer"]
+        for artifact in manifest["artifacts"]:
+            content = archive.read(artifact["path"])
+            assert len(content) == artifact["bytes"]
+            assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
+        all_content = b"".join(archive.read(name) for name in archive.namelist())
+        assert b"correct-horse-battery-staple" not in all_content
+        assert viewer_token.encode() not in all_content
+
     owner = auth.authenticate(owner_token)
     other = auth.create_workspace(principal=owner, name="Other")
     denied = client.get(
@@ -127,6 +161,11 @@ def test_viewer_can_export_reports_but_cannot_cross_workspace(tmp_path: Path, mo
         headers=_bearer(viewer_token),
     )
     assert denied.status_code == 403
+    bundle_denied = client.get(
+        f"/api/v1/workspaces/{other.id}/reports/pilot-evidence.zip",
+        headers=_bearer(viewer_token),
+    )
+    assert bundle_denied.status_code == 403
 
 
 def test_reporting_requires_authentication(tmp_path: Path, monkeypatch) -> None:
@@ -134,5 +173,9 @@ def test_reporting_requires_authentication(tmp_path: Path, monkeypatch) -> None:
     _, workspace_id = _bootstrap(client)
 
     response = client.get(f"/api/v1/workspaces/{workspace_id}/reports/executive")
+    bundle = client.get(
+        f"/api/v1/workspaces/{workspace_id}/reports/pilot-evidence.zip"
+    )
 
     assert response.status_code == 401
+    assert bundle.status_code == 401
