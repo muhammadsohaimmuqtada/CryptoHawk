@@ -2,8 +2,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import cryptohawk.api.oidc as oidc_api
+import cryptohawk.api.app as api_module
 import cryptohawk.api.middleware as middleware_module
+import cryptohawk.api.oidc as oidc_api
 from cryptohawk.services.oidc import OidcAuthorizationStart
 from cryptohawk.storage.audit import AuditRepository
 from cryptohawk.storage.auth import AuthRepository
@@ -14,8 +15,8 @@ class _FakeOidcService:
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         self.browser_binding = ""
-        self.callback = None
-        self.exchange = None
+        self.callback: tuple[str, str, str] | None = None
+        self.exchange: tuple[str, str] | None = None
 
     async def begin_authorization(self, *, browser_binding: str) -> OidcAuthorizationStart:
         self.browser_binding = browser_binding
@@ -67,4 +68,38 @@ def test_oidc_http_flow_uses_browser_binding_and_normal_session(
     monkeypatch.setattr(oidc_api.settings, "oidc_frontend_url", "https://app.example.com")
     monkeypatch.setattr(middleware_module, "audit_repo", audit)
 
-    client = TestClient(oidc_api.router.routes[0].endpoint.__globals__["router"].routes[0].app)
+    client = TestClient(api_module.app)
+
+    status_response = client.get("/api/v1/auth/oidc/status")
+    assert status_response.status_code == 200
+    assert status_response.json() == {"enabled": True}
+
+    start = client.get("/api/v1/auth/oidc/start", follow_redirects=False)
+    assert start.status_code == 307
+    assert start.headers["location"].startswith("https://idp.example.com/authorize")
+    assert fake.browser_binding
+    assert client.cookies.get("cryptohawk_oidc_binding") == fake.browser_binding
+
+    callback = client.get(
+        "/api/v1/auth/oidc/callback?code=provider-code&state=provider-state",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == (
+        "https://app.example.com/#oidc_code=choc_completion-code-value"
+    )
+    assert fake.callback == ("provider-code", "provider-state", fake.browser_binding)
+    assert client.cookies.get("cryptohawk_oidc_binding") == fake.browser_binding
+
+    exchange = client.post(
+        "/api/v1/auth/oidc/exchange",
+        json={"code": "choc_completion-code-value"},
+    )
+    assert exchange.status_code == 200
+    body = exchange.json()
+    assert body["user"]["id"] == issued.user.id
+    assert body["token"].startswith("chs_")
+    assert fake.exchange == ("choc_completion-code-value", fake.browser_binding)
+    principal = auth.authenticate(body["token"])
+    assert principal.user_id == issued.user.id
+    assert client.cookies.get("cryptohawk_oidc_binding") is None
