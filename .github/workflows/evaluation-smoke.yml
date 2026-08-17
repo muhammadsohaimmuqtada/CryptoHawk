@@ -1,0 +1,29 @@
+name: Evaluation Smoke
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluation-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate evaluation Compose rendering
+        run: docker compose -f docker-compose.evaluation.yml config --quiet
+      - name: Start isolated evaluation stack
+        run: >-
+          docker compose -f docker-compose.evaluation.yml
+          up -d --build db migrate api worker scheduler seed web
+      - name: Exercise tester login, estate, reports, CBOM and web proxy
+        run: docker compose -f docker-compose.evaluation.yml run --rm smoke
+      - name: Preserve evaluation logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.evaluation.yml logs --no-color
+      - name: Tear down isolated evaluation stack
+        if: always()
+        run: docker compose -f docker-compose.evaluation.yml down -v --remove-orphans
