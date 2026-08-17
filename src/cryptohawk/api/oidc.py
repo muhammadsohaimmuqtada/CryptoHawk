@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -61,18 +62,6 @@ def _frontend_redirect(fragment: str) -> str:
     return f"{origin}/#{fragment}"
 
 
-def _set_binding_cookie(response: Response, value: str, max_age: int) -> None:
-    response.set_cookie(
-        _BINDING_COOKIE,
-        value,
-        max_age=max_age,
-        httponly=True,
-        secure=settings.is_production,
-        samesite="lax",
-        path="/api/v1/auth/oidc",
-    )
-
-
 def _clear_binding_cookie(response: Response) -> None:
     response.delete_cookie(
         _BINDING_COOKIE,
@@ -91,8 +80,9 @@ def oidc_status() -> dict[str, bool]:
 @router.get("/api/v1/auth/oidc/start")
 async def oidc_start(request: Request) -> Response:
     _rate_limit(request, "start")
+    browser_binding = secrets.token_urlsafe(32)
     try:
-        started = await _service().begin_authorization()
+        started = await _service().begin_authorization(browser_binding=browser_binding)
     except OidcConfigurationError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except OidcProviderError as exc:
@@ -102,10 +92,14 @@ async def oidc_start(request: Request) -> Response:
         started.authorization_url,
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
-    _set_binding_cookie(
-        response,
-        started.browser_binding,
-        settings.oidc_transaction_ttl_seconds,
+    response.set_cookie(
+        _BINDING_COOKIE,
+        browser_binding,
+        max_age=settings.oidc_transaction_ttl_seconds,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path="/api/v1/auth/oidc",
     )
     return response
 
@@ -140,16 +134,12 @@ async def oidc_callback(
         _clear_binding_cookie(response)
         return response
 
-    response = RedirectResponse(
+    # The original HttpOnly binding cookie remains valid for the short exchange
+    # window; never reflect a request cookie back into a Set-Cookie response.
+    return RedirectResponse(
         _frontend_redirect(f"oidc_code={quote(completion, safe='')}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
-    _set_binding_cookie(
-        response,
-        browser_binding,
-        settings.oidc_completion_ttl_seconds,
-    )
-    return response
 
 
 @router.post("/api/v1/auth/oidc/exchange", response_model=IssuedToken)
