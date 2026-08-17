@@ -174,3 +174,15 @@ export async function login(email: string, password: string): Promise<IssuedToke
     body: JSON.stringify({ email, password }),
   })
 }
+
+export async function oidcStatus(): Promise<{ enabled: boolean }> {
+  return publicJson<{ enabled: boolean }>('/api/v1/auth/oidc/status')
+}
+
+export async function exchangeOidc(code: string): Promise<IssuedToken> {
+  return publicJson<IssuedToken>('/api/v1/auth/oidc/exchange', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+}
