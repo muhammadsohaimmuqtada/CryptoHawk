@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from cryptohawk.api.auth import inventory, require_workspace_role
+from cryptohawk.api.oidc import router as oidc_router
 from cryptohawk.api.schemas import WorkspaceDeleteRequest, WorkspaceRetentionPolicyRequest
 from cryptohawk.domain.auth import Principal, PrincipalKind, WorkspaceRole
 from cryptohawk.domain.retention import RetentionSweepResult, WorkspaceRetentionPolicy
@@ -14,6 +15,7 @@ from cryptohawk.storage.retention import (
 )
 
 router = APIRouter()
+router.include_router(oidc_router)
 retention_repo = WorkspaceRetentionRepository(inventory)
 ViewerPrincipal = Annotated[
     Principal,
