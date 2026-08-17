@@ -19,7 +19,9 @@ jobs:
         run: >-
           docker compose -f docker-compose.evaluation.yml
           up -d --build db migrate api worker scheduler seed web
-      - name: Exercise tester login, estate, reports, CBOM and web proxy
+      - name: Build exact-head smoke verifier
+        run: docker compose -f docker-compose.evaluation.yml build smoke
+      - name: Exercise tester login, estate, workspace lifecycle, reports, CBOM and web proxy
         run: docker compose -f docker-compose.evaluation.yml run --rm smoke
       - name: Preserve evaluation logs on failure
         if: failure()
