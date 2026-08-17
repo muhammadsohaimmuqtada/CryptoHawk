@@ -19,6 +19,8 @@ jobs:
         run: >-
           docker compose -f docker-compose.evaluation.yml
           up -d --build db migrate api worker scheduler seed web
+      - name: Verify managed repository runtime
+        run: docker compose -f docker-compose.evaluation.yml exec -T worker git --version
       - name: Build exact-head smoke verifier
         run: docker compose -f docker-compose.evaluation.yml build smoke
       - name: Exercise tester login, estate, workspace lifecycle, reports, CBOM and web proxy
