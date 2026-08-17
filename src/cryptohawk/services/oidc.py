@@ -200,11 +200,10 @@ class OidcService:
         authorization_endpoint = payload.get("authorization_endpoint")
         token_endpoint = payload.get("token_endpoint")
         jwks_uri = payload.get("jwks_uri")
-        if not all(isinstance(value, str) and value for value in (
-            authorization_endpoint,
-            token_endpoint,
-            jwks_uri,
-        )):
+        if not all(
+            isinstance(value, str) and value
+            for value in (authorization_endpoint, token_endpoint, jwks_uri)
+        ):
             raise OidcProviderError("OIDC discovery metadata is incomplete")
 
         for endpoint, label in (
@@ -270,13 +269,6 @@ class OidcService:
         key_set = await self._jwks(metadata)
         client_id = self.settings.oidc_client_id
 
-        def audience_matches(_claims, audience) -> bool:
-            if isinstance(audience, str):
-                return audience == client_id
-            if isinstance(audience, list):
-                return client_id in audience
-            return False
-
         try:
             decoded = jwt.decode(
                 id_token,
@@ -289,7 +281,7 @@ class OidcService:
                 options={
                     "iss": {"essential": True, "value": metadata.issuer},
                     "sub": {"essential": True},
-                    "aud": {"essential": True, "validate": audience_matches},
+                    "aud": {"essential": True, "value": client_id},
                     "exp": {"essential": True},
                     "iat": {"essential": True},
                     "nonce": {"essential": True},
