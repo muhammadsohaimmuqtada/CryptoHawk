@@ -17,6 +17,7 @@ from cryptohawk.services.executor import AssetScanError, AssetScanExecutor
 from cryptohawk.storage.continuous import ContinuousRepository
 from cryptohawk.storage.inventory import InventoryRepository
 from cryptohawk.storage.queue import ScanQueueRepository
+from cryptohawk.storage.retention import WorkspaceRetentionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,14 @@ class ScanScheduler:
         *,
         executor: AssetScanExecutor,
         config: SchedulerConfig | None = None,
+        retention: WorkspaceRetentionRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.queue = queue
         self.continuous = continuous
         self.executor = executor
         self.config = config or SchedulerConfig()
+        self.retention = retention
 
     def run_once(self, *, now: datetime | None = None) -> int:
         configure_observability()
@@ -59,6 +62,22 @@ class ScanScheduler:
         ) as span:
             try:
                 current = now or datetime.now(UTC)
+                if self.retention is not None:
+                    sweeps = self.retention.run_due_retention(
+                        now=current,
+                        limit=min(self.config.batch_size, 100),
+                    )
+                    span.set_attribute("cryptohawk.retention.sweep_count", len(sweeps))
+                    for sweep in sweeps:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "retention.sweep.completed",
+                            workspace_id=sweep.workspace_id,
+                            deleted_rows=sum(sweep.deleted_rows.values()),
+                            protected_evidence_jobs=sweep.protected_evidence_jobs,
+                        )
+
                 schedules = self.continuous.list_due_schedules(
                     now=current,
                     limit=self.config.batch_size,
