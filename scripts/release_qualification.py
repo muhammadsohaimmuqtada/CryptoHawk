@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from cryptohawk.domain.inventory import ManagedAssetKind
 from cryptohawk.domain.models import ScanContext
 from cryptohawk.domain.remediation import RemediationStatus
@@ -28,6 +30,7 @@ def main() -> None:
     continuous = ContinuousRepository(inventory)
     policies = PolicyRepository(inventory)
     remediation = RemediationRepository(inventory)
+    retention = WorkspaceRetentionRepository(inventory)
 
     workspace = inventory.create_workspace(name="Release Qualification")
     asset = inventory.create_asset(
@@ -128,7 +131,28 @@ def main() -> None:
     if not all(snapshot.policy_version == effective.provenance_ref for snapshot in history):
         raise AssertionError("scan history did not retain the exact policy provenance")
 
-    purge = WorkspaceRetentionRepository(inventory).purge_workspace(workspace.id)
+    retention.set_policy(
+        workspace_id=workspace.id,
+        enabled=True,
+        evidence_retention_days=7,
+        audit_retention_days=7,
+        sweep_interval_hours=1,
+        updated_by="system:release-qualification",
+    )
+    sweep = retention.prune_workspace_history(
+        workspace_id=workspace.id,
+        now=datetime.now(UTC) + timedelta(days=8),
+    )
+    if sweep is None or sweep.deleted_rows.get("scan_snapshots", 0) < 1:
+        raise AssertionError("retention policy did not expire old PostgreSQL scan history")
+    retained_history = continuous.list_scan_history(
+        workspace_id=workspace.id,
+        asset_id=asset.id,
+    )
+    if len(retained_history) != 1 or retained_history[0].job_id != verification_job.id:
+        raise AssertionError("retention policy did not preserve the newest scan evidence")
+
+    purge = retention.purge_workspace(workspace.id)
     if purge.workspace_id != workspace.id or inventory.get_workspace(workspace.id) is not None:
         raise AssertionError("workspace purge did not remove the qualified tenant on PostgreSQL")
     if findings.list_findings(workspace_id=workspace.id):
@@ -140,6 +164,7 @@ def main() -> None:
         f"source_job={source_job.id}",
         f"verification_job={verification_job.id}",
         f"policy={effective.provenance_ref}",
+        f"retention_deleted={sum(sweep.deleted_rows.values())}",
         "workspace_purged=true",
     )
 
