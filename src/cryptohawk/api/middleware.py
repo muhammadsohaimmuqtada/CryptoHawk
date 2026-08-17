@@ -217,6 +217,8 @@ class SecurityAuditMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _workspace_id(request: Request) -> str | None:
+        if hasattr(request.state, "audit_workspace_id_override"):
+            return request.state.audit_workspace_id_override
         match = _WORKSPACE_PATH.match(request.url.path)
         return match.group(1) if match else None
 
